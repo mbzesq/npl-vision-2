@@ -224,8 +224,8 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                             {(assignment.recording_date || assignment.recordingDate) && (
                               <span>Recorded: {formatDate(assignment.recording_date || assignment.recordingDate)}</span>
                             )}
-                            {assignment.mers_info?.isMERS && (
-                              <span className="text-green-600">MERS Nominee</span>
+                            {(assignment.mers_flag || assignment.assignor_mers_info?.isMERS || assignment.assignee_mers_info?.isMERS) && (
+                              <span className="text-green-600">MERS Passthrough</span>
                             )}
                             {assignment.poa_info?.isPOA && assignment.poa_info.principal && (
                               <span className="text-blue-600">POA: {assignment.poa_info.principal}</span>

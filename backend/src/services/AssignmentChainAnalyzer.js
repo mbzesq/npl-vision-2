@@ -387,13 +387,34 @@ ${text.substring(0, 8000)}`;
       const assignorOriginal = assignment.assignor_name || assignment.assignor;
       const assigneeOriginal = assignment.assignee_name || assignment.assignee;
       
-      // Handle MERS special case
-      const mersInfo = this.analyzeMERSRole(assignorOriginal);
-      const poaInfo = this.analyzePOARole(assignorOriginal, assignment.principal_name);
+      // Analyze MERS roles for both assignor and assignee
+      const assignorMersInfo = this.analyzeMERSRole(assignorOriginal);
+      const assigneeMersInfo = this.analyzeMERSRole(assigneeOriginal);
+      const assignorPOAInfo = this.analyzePOARole(assignorOriginal, assignment.principal_name);
       
-      // Determine effective parties for chain validation
-      const effectiveAssignor = mersInfo.effectiveName || poaInfo.effectiveName || assignorOriginal;
-      const effectiveAssignee = assignment.assignee_name || assignment.assignee;
+      // CRITICAL FIX: Determine true effective parties (not MERS)
+      let effectiveAssignor, effectiveAssignee;
+      
+      // For assignor: Use true party name (not MERS)
+      if (assignorMersInfo.isMERS && assignorMersInfo.effectiveName) {
+        effectiveAssignor = assignorMersInfo.effectiveName; // The true lender MERS represents
+      } else if (assignorPOAInfo.isPOA && assignorPOAInfo.effectiveName) {
+        effectiveAssignor = assignorPOAInfo.effectiveName; // The principal in POA relationship
+      } else {
+        effectiveAssignor = assignorOriginal;
+      }
+      
+      // For assignee: Use true party name (not MERS)  
+      if (assigneeMersInfo.isMERS && assigneeMersInfo.effectiveName) {
+        // If MERS nominee says "Lender" instead of actual name, try to use original lender
+        if (assigneeMersInfo.effectiveName.toLowerCase().includes('lender') && originalLender) {
+          effectiveAssignee = originalLender;
+        } else {
+          effectiveAssignee = assigneeMersInfo.effectiveName; // The true lender MERS represents
+        }
+      } else {
+        effectiveAssignee = assigneeOriginal;
+      }
       
       return {
         ...assignment,
@@ -401,7 +422,7 @@ ${text.substring(0, 8000)}`;
         assignor_original: assignorOriginal,
         assignee_original: assigneeOriginal,
         
-        // Store normalized names for display
+        // Store normalized names for display (cleaned true parties, not MERS)
         assignor_normalized: this.getNormalizedName(effectiveAssignor),
         assignee_normalized: this.getNormalizedName(effectiveAssignee),
         
@@ -410,8 +431,10 @@ ${text.substring(0, 8000)}`;
         effectiveAssignee: effectiveAssignee,
         
         // Store special role information
-        mers_info: mersInfo.isMERS ? mersInfo : null,
-        poa_info: poaInfo.isPOA ? poaInfo : null,
+        assignor_mers_info: assignorMersInfo.isMERS ? assignorMersInfo : null,
+        assignee_mers_info: assigneeMersInfo.isMERS ? assigneeMersInfo : null,
+        mers_flag: assignorMersInfo.isMERS || assigneeMersInfo.isMERS,
+        poa_info: assignorPOAInfo.isPOA ? assignorPOAInfo : null,
         
         // Add confidence scoring
         confidence_score: this.calculateAssignmentConfidence(assignment),
@@ -464,6 +487,10 @@ ${text.substring(0, 8000)}`;
     }
 
     console.log(`🎯 Enhanced chain validation complete. Complete: ${isComplete}, Issues: ${issues.length}`);
+    console.log('📋 Enhanced assignments summary:');
+    enhancedAssignments.forEach((assignment, idx) => {
+      console.log(`  Assignment ${idx + 1}: ${assignment.assignor_normalized} → ${assignment.assignee_normalized} ${assignment.mers_flag ? '[MERS]' : ''}`);
+    });
 
     return {
       isComplete,
@@ -622,15 +649,29 @@ ${text.substring(0, 8000)}`;
     
     const lowerName = partyName.toLowerCase();
     
-    // Look for MERS nominee patterns
-    const mersNomineeMatch = lowerName.match(/mers.*as nominee for (.+?)(?:,|$)/);
+    // Look for MERS nominee patterns - more comprehensive matching
+    const mersPatterns = [
+      /mers.*as nominee for (.+?)(?:,|\s+and\s|$)/i,
+      /mers.*solely as nominee for (.+?)(?:,|\s+and\s|$)/i,
+      /mortgage electronic registration systems.*as nominee for (.+?)(?:,|\s+and\s|$)/i
+    ];
+    
+    let mersNomineeMatch = null;
+    for (const pattern of mersPatterns) {
+      mersNomineeMatch = partyName.match(pattern);
+      if (mersNomineeMatch) break;
+    }
     
     if (mersNomineeMatch || lowerName.includes('mers')) {
+      const effectiveName = mersNomineeMatch ? mersNomineeMatch[1].trim() : null;
+      
       return {
         isMERS: true,
         originalName: partyName,
-        effectiveName: mersNomineeMatch ? mersNomineeMatch[1].trim() : null,
-        role: 'nominee'
+        effectiveName: effectiveName,
+        role: 'nominee',
+        // CRITICAL: MERS should always be treated as passthrough to the true party
+        isPassthrough: true
       };
     }
     

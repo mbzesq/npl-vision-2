@@ -142,6 +142,8 @@ async function processFile(file) {
         if (existingLoan) {
           // Update existing loan with new/better data
           const updatedFields = this.mergeAndUpdateLoanData(existingLoan, loanData);
+          console.log('🔄 Updating loan with fields:', Object.keys(updatedFields));
+          console.log('📊 New data values:', updatedFields);
           await existingLoan.update(updatedFields);
           loan = existingLoan;
           action = 'updated';

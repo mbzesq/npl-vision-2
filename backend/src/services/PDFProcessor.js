@@ -122,6 +122,7 @@ class PDFProcessor {
       // Merge all extracted data into a single comprehensive loan record
       if (allExtractedData.length > 0) {
         const mergedLoanData = this.mergeExtractedData(allExtractedData);
+        console.log('📋 Final merged loan data:', JSON.stringify(mergedLoanData, null, 2));
         results.data.push(mergedLoanData);
       }
 

@@ -4,7 +4,7 @@ import { useState, useRef } from 'react'
 import { CloudArrowUpIcon, DocumentIcon, ExclamationTriangleIcon } from '@heroicons/react/24/outline'
 import axios from 'axios'
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000'
 
 export default function FileUpload({ onUploadStart, onUploadSuccess, onUploadError, isLoading }) {
   const [selectedFiles, setSelectedFiles] = useState([])
@@ -36,11 +36,15 @@ export default function FileUpload({ onUploadStart, onUploadSuccess, onUploadErr
   }
 
   const handleFiles = (files) => {
+    console.log('📁 Files selected:', files.length)
     const validFiles = files.filter(file => {
       const extension = file.name.toLowerCase().split('.').pop()
-      return ['xlsx', 'xls', 'pdf'].includes(extension)
+      const isValid = ['xlsx', 'xls', 'pdf'].includes(extension)
+      console.log(`📄 File: ${file.name}, Extension: ${extension}, Valid: ${isValid}`)
+      return isValid
     })
 
+    console.log('✅ Valid files:', validFiles.length)
     setSelectedFiles(prev => [...prev, ...validFiles])
   }
 
@@ -49,11 +53,14 @@ export default function FileUpload({ onUploadStart, onUploadSuccess, onUploadErr
   }
 
   const uploadFile = async (file) => {
+    console.log(`🚀 Starting upload for: ${file.name}`)
     const formData = new FormData()
     formData.append('file', file)
 
     const extension = file.name.toLowerCase().split('.').pop()
-    const endpoint = ['xlsx', 'xls'].includes(extension) ? '/api/upload/excel' : '/api/upload/pdf'
+    const endpoint = ['xlsx', 'xls'].includes(extension) ? '/api/upload' : '/api/upload/pdf'
+    
+    console.log(`📡 Uploading to: ${API_BASE_URL}${endpoint}`)
 
     try {
       const response = await axios.post(`${API_BASE_URL}${endpoint}`, formData, {
@@ -61,11 +68,13 @@ export default function FileUpload({ onUploadStart, onUploadSuccess, onUploadErr
           'Content-Type': 'multipart/form-data',
         },
       })
+      console.log(`✅ Upload successful for: ${file.name}`)
       return { success: true, data: response.data, fileName: file.name }
     } catch (error) {
+      console.error(`❌ Upload failed for: ${file.name}`, error)
       return { 
         success: false, 
-        error: error.response?.data?.detail || error.message, 
+        error: error.response?.data?.detail || error.response?.data?.error || error.message, 
         fileName: file.name 
       }
     }

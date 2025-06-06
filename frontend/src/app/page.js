@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import LoanDetailsTable from '@/components/LoanDetailsTable'
+import LoanDetailsTable from '../components/LoanDetailsTable'
 
 export default function Dashboard() {
   const [stats, setStats] = useState({

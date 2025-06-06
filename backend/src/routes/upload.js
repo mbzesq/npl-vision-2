@@ -11,7 +11,7 @@ const pdfProcessor = new PDFProcessor();
 const dataValidator = new DataValidator();
 
 // Upload PDF files
-router.post('/pdf', upload.array('files', 10), async (req, res) => {
+router.post('/pdf', upload.any(), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: 'No files uploaded' });

@@ -216,25 +216,35 @@ ${text.substring(0, 8000)}`;
 
     const prompt = `Extract detailed assignment information from this Assignment of Mortgage document.
 
-Extract these fields:
-1. assignor_name: The party transferring the mortgage
-2. assignee_name: The party receiving the mortgage
+Extract these fields with EXACT full names:
+1. assignor_name: The party transferring the mortgage (FULL EXACT NAME)
+2. assignee_name: The party receiving the mortgage (FULL EXACT NAME)
 3. execution_date: When the assignment was signed (YYYY-MM-DD)
 4. recording_date: When recorded at county (YYYY-MM-DD)
 5. instrument_number: Recording/document number if mentioned
 6. power_of_attorney_indicator: true if "attorney-in-fact", "AIF", or "POA" appears
-7. principal_name: If POA is used, who is the principal (e.g., "Deutsche Bank" if "Ocwen as attorney-in-fact for Deutsche Bank")
+7. principal_name: If POA is used, who is the principal
 
-IMPORTANT RULES:
-- If you see "MERS as nominee for [Company]", treat [Company] as the true assignor
-- If you see "attorney-in-fact for [Principal]", extract [Principal] as principal_name
+CRITICAL RULES:
+- Extract COMPLETE party names including all nominee/trustee language
+- If you see "MERS as nominee for [Company]", extract the FULL text as assignor/assignee
+- If you see "Mortgage Electronic Registration Systems, Inc. as nominee for...", extract COMPLETE text
+- Do NOT abbreviate or truncate party names
+- Include all "as nominee for", "as trustee for", "d/b/a" language in the name
 - Look for dates near "Dated:", "Executed:", "Date of Assignment:"
 - Look for recording info near "Recorded:", "Filed:", "Instrument No:"
 
+EXAMPLES:
+✅ GOOD: "MERS as nominee for Lender and Lender's successors and assigns"
+❌ BAD: "MERS"
+
+✅ GOOD: "Bank of America, N.A. by Nationstar Mortgage LLC as Attorney in Fact"  
+❌ BAD: "Bank of America"
+
 Return JSON:
 {
-  "assignor_name": "exact name",
-  "assignee_name": "exact name",
+  "assignor_name": "COMPLETE EXACT NAME WITH ALL LANGUAGE",
+  "assignee_name": "COMPLETE EXACT NAME WITH ALL LANGUAGE",
   "execution_date": "YYYY-MM-DD or null",
   "recording_date": "YYYY-MM-DD or null", 
   "instrument_number": "number or null",
@@ -289,12 +299,51 @@ ${text.substring(0, 8000)}`;
   }
 
   extractAssignmentFallback(text) {
-    // Enhanced pattern matching for assignment documents
-    const assignorMatch = text.match(/assignor[:\s]*([^,\n]+)/i);
-    const assigneeMatch = text.match(/assignee[:\s]*([^,\n]+)/i);
-    const dateMatch = text.match(/dated?\s*:?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i);
+    // Enhanced pattern matching for assignment documents with better MERS handling
+    
+    // Look for various assignor patterns
+    const assignorPatterns = [
+      /assignor[:\s]*([^,\n]+?)(?:\s*,\s*(?:assignee|to|hereby))/i,
+      /hereby assigns?.*?to\s+([^,\n]+)/i,
+      /grants?,\s*assigns?.*?to\s+([^,\n]+)/i
+    ];
+    
+    // Look for various assignee patterns  
+    const assigneePatterns = [
+      /assignee[:\s]*([^,\n]+?)(?:\s*,|\s*$|\s*(?:recorded|dated))/i,
+      /(?:assigns?|transfers?).*?to\s+([^,\n]+?)(?:\s*,|\s*$)/i,
+      /in favor of\s+([^,\n]+?)(?:\s*,|\s*$)/i
+    ];
+    
+    let assignorMatch = null, assigneeMatch = null;
+    
+    // Try assignor patterns
+    for (const pattern of assignorPatterns) {
+      assignorMatch = text.match(pattern);
+      if (assignorMatch) break;
+    }
+    
+    // Try assignee patterns
+    for (const pattern of assigneePatterns) {
+      assigneeMatch = text.match(pattern);  
+      if (assigneeMatch) break;
+    }
+    
+    // Enhanced date matching
+    const datePatterns = [
+      /dated?\s*:?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i,
+      /executed\s*(?:on|this)?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i,
+      /day of\s+(\w+),?\s*([0-9]{4})/i
+    ];
+    
+    let dateMatch = null;
+    for (const pattern of datePatterns) {
+      dateMatch = text.match(pattern);
+      if (dateMatch) break;
+    }
+    
     const recordedMatch = text.match(/recorded?\s*:?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i);
-    const instrumentMatch = text.match(/instrument\s*(?:no\.?|number)\s*:?\s*([0-9\-]+)/i);
+    const instrumentMatch = text.match(/instrument\s*(?:no\.?|number)\s*:?\s*([A-Za-z0-9\-]+)/i);
     const poaIndicator = /attorney.?in.?fact|aif\b|power.?of.?attorney/i.test(text);
     
     // Extract principal name if POA is detected
@@ -405,12 +454,17 @@ ${text.substring(0, 8000)}`;
       }
       
       // For assignee: Use true party name (not MERS)  
-      if (assigneeMersInfo.isMERS && assigneeMersInfo.effectiveName) {
-        // If MERS nominee says "Lender" instead of actual name, try to use original lender
-        if (assigneeMersInfo.effectiveName.toLowerCase().includes('lender') && originalLender) {
-          effectiveAssignee = originalLender;
+      if (assigneeMersInfo.isMERS) {
+        if (assigneeMersInfo.effectiveName) {
+          // If MERS nominee says "Lender" instead of actual name, try to use original lender
+          if (assigneeMersInfo.effectiveName.toLowerCase().includes('lender') && originalLender) {
+            effectiveAssignee = originalLender;
+          } else {
+            effectiveAssignee = assigneeMersInfo.effectiveName; // The true lender MERS represents
+          }
         } else {
-          effectiveAssignee = assigneeMersInfo.effectiveName; // The true lender MERS represents
+          // If MERS with no nominee info, but we know it's related to original lender
+          effectiveAssignee = originalLender || assigneeOriginal;
         }
       } else {
         effectiveAssignee = assigneeOriginal;

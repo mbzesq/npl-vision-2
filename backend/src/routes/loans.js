@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { Loan } = require('../models');
+const { Loan, ExtractionLog } = require('../models');
 const { Op } = require('sequelize');
 
 // Get all loans with pagination and filtering
@@ -105,6 +105,41 @@ router.delete('/:id', async (req, res) => {
   } catch (error) {
     console.error('Delete loan error:', error);
     res.status(500).json({ error: 'Failed to delete loan' });
+  }
+});
+
+// Delete ALL loans (use with caution!)
+router.delete('/all/clear', async (req, res) => {
+  try {
+    // Optional: Add some basic protection
+    if (req.query.confirm !== 'yes') {
+      return res.status(400).json({ 
+        error: 'Add ?confirm=yes to the URL to confirm deletion of all loans' 
+      });
+    }
+
+    const loanCount = await Loan.count();
+    const logCount = await ExtractionLog.count();
+
+    // Clear all loans
+    await Loan.destroy({
+      where: {},
+      truncate: true
+    });
+
+    // Clear all extraction logs
+    await ExtractionLog.destroy({
+      where: {},
+      truncate: true
+    });
+
+    res.json({ 
+      message: `Successfully deleted ${loanCount} loans and ${logCount} extraction logs` 
+    });
+
+  } catch (error) {
+    console.error('Error clearing loans:', error);
+    res.status(500).json({ error: 'Failed to clear loans' });
   }
 });
 

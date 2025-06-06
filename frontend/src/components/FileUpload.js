@@ -31,7 +31,10 @@ export default function FileUpload({ onUploadStart, onUploadSuccess, onUploadErr
   }
 
   const handleFileInput = (e) => {
+    console.log('🎯 File input triggered!')
+    console.log('📁 Raw files from input:', e.target.files)
     const files = Array.from(e.target.files)
+    console.log('📁 Files array:', files)
     handleFiles(files)
   }
 

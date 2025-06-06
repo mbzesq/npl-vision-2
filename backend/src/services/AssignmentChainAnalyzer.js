@@ -373,7 +373,29 @@ ${text.substring(0, 8000)}`;
       return true;
     });
     
-    return validAssignments;
+    return validAssignments.map(assignment => this.correctAssignmentDirection(assignment));
+  }
+
+  correctAssignmentDirection(assignment) {
+    const assignorName = assignment.assignor_name || assignment.assignor || '';
+    const assigneeName = assignment.assignee_name || assignment.assignee || '';
+    
+    // Check if this looks like a backwards MERS assignment
+    const assignorIsMERS = assignorName.toLowerCase().includes('mers');
+    const assigneeIsCountrywide = assigneeName.toLowerCase().includes('countrywide');
+    
+    if (assignorIsMERS && assigneeIsCountrywide) {
+      console.log('🔄 Detected backwards MERS assignment - MERS should not assign TO Countrywide');
+      console.log('🔄 Correcting: MERS represents Countrywide, so this should be Countrywide assigning to someone else');
+      
+      // This assignment likely represents Countrywide (via MERS) assigning to the current assignee
+      // But we need to figure out who the real assignee is from the context
+      // For now, let's flag this as needing correction
+      assignment.needsDirectionCorrection = true;
+      assignment.correctionNote = 'MERS assignment direction may be backwards';
+    }
+    
+    return assignment;
   }
 
   isIndividualBorrowerToMERS(assignorName, assigneeName) {
@@ -1192,10 +1214,28 @@ ${text.substring(0, 8000)}`;
     if (isMERSEntity) {
       let principal = this.extractMERSPrincipal(partyName);
       
-      // CRITICAL: If MERS nominee says "Lender" and we have context, use the context
+      // CRITICAL: If MERS nominee says "Lender" and we have context, determine the real principal
       if (!principal && contextPartyName) {
-        console.log(`🔍 Using context party "${contextPartyName}" as MERS principal`);
-        principal = contextPartyName;
+        // The context party name could be either the assignor or assignee
+        // If MERS is the assignor, the assignee is who MERS is assigning TO
+        // If MERS is the assignee, the assignor is who is assigning TO MERS
+        // In most cases, MERS as nominee represents the original lender (Countrywide)
+        console.log(`🔍 MERS nominee has generic "Lender" - analyzing context "${contextPartyName}"`);
+        
+        // In this specific case, if the assignment shows MERS → Countrywide,
+        // it likely means Countrywide (via MERS nominee) → Bank of America
+        const isCountrywide = contextPartyName.toLowerCase().includes('countrywide');
+        const isBankOfAmerica = contextPartyName.toLowerCase().includes('bank of america');
+        
+        if (isCountrywide) {
+          // MERS represents Countrywide, so principal is Countrywide
+          principal = contextPartyName;
+          console.log(`🔍 MERS represents Countrywide: ${contextPartyName}`);
+        } else {
+          // Use context as fallback
+          principal = contextPartyName;
+          console.log(`🔍 Using context party "${contextPartyName}" as MERS principal`);
+        }
       }
       
       return {

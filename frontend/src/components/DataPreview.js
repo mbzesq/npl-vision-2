@@ -23,6 +23,7 @@ export default function DataPreview({ data }) {
     return `${(parseFloat(value) * 100).toFixed(2)}%`
   }
 
+
   return (
     <div className="bg-white p-6 rounded-lg shadow">
       <div className="mb-6">
@@ -65,34 +66,26 @@ export default function DataPreview({ data }) {
                 <h3 className="text-lg font-medium text-gray-900">{result.fileName}</h3>
                 <div className="flex items-center text-green-600">
                   <CheckCircleIcon className="h-5 w-5 mr-1" />
-                  <span className="text-sm">Processed successfully</span>
+                  <span className="text-sm">Processed and saved successfully</span>
                 </div>
               </div>
 
-              {result.data.loans_created && (
+              {result.loansCreated !== undefined && (
                 <div className="mb-4">
                   <p className="text-sm text-gray-600">
-                    <strong>{result.data.loans_created}</strong> loans created from this file
+                    <strong>{result.loansCreated}</strong> loans automatically saved to database
                   </p>
-                </div>
-              )}
-
-              {result.data.document_data && (
-                <div className="mb-4">
-                  <p className="text-sm text-gray-600">
-                    Document Type: <strong>{result.data.document_data.document_type || 'Unknown'}</strong>
-                  </p>
-                  {result.data.confidence && (
-                    <p className="text-sm text-gray-600">
-                      Extraction Confidence: <strong>{(result.data.confidence * 100).toFixed(1)}%</strong>
+                  {result.saveErrors > 0 && (
+                    <p className="text-sm text-red-600">
+                      <strong>{result.saveErrors}</strong> loans failed to save
                     </p>
                   )}
                 </div>
               )}
 
-              {result.data.preview && result.data.preview.length > 0 && (
+              {result.data && result.data.length > 0 && (
                 <div>
-                  <h4 className="text-md font-medium text-gray-900 mb-3">Data Preview</h4>
+                  <h4 className="text-md font-medium text-gray-900 mb-3">Saved Loans</h4>
                   <div className="overflow-x-auto">
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
@@ -101,24 +94,27 @@ export default function DataPreview({ data }) {
                             Borrower
                           </th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                            Property Address
+                          </th>
+                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                             Loan Amount
                           </th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
                             Interest Rate
                           </th>
                           <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                            Current UPB
-                          </th>
-                          <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                            Status
+                            Loan ID
                           </th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
-                        {result.data.preview.slice(0, 5).map((loan, loanIndex) => (
+                        {result.data.slice(0, 5).map((loan, loanIndex) => (
                           <tr key={loanIndex}>
                             <td className="px-4 py-2 text-sm text-gray-900">
                               {loan.borrower_name || '-'}
+                            </td>
+                            <td className="px-4 py-2 text-sm text-gray-900">
+                              {loan.property_address || '-'}
                             </td>
                             <td className="px-4 py-2 text-sm text-gray-900">
                               {formatCurrency(loan.loan_amount)}
@@ -126,66 +122,19 @@ export default function DataPreview({ data }) {
                             <td className="px-4 py-2 text-sm text-gray-900">
                               {formatPercentage(loan.interest_rate)}
                             </td>
-                            <td className="px-4 py-2 text-sm text-gray-900">
-                              {formatCurrency(loan.current_upb)}
-                            </td>
-                            <td className="px-4 py-2 text-sm text-gray-900">
-                              {loan.legal_status || '-'}
+                            <td className="px-4 py-2 text-sm text-gray-500">
+                              #{loan.id}
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-                  {result.data.preview.length > 5 && (
+                  {result.data.length > 5 && (
                     <p className="text-sm text-gray-500 mt-2">
-                      Showing first 5 of {result.data.preview.length} loans
+                      Showing first 5 of {result.data.length} loans saved
                     </p>
                   )}
-                </div>
-              )}
-
-              {result.data.document_data && (
-                <div>
-                  <h4 className="text-md font-medium text-gray-900 mb-3">Document Information</h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <span className="text-gray-600">Borrower:</span>
-                      <span className="ml-2 text-gray-900">
-                        {result.data.document_data.borrower_name || '-'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Loan Amount:</span>
-                      <span className="ml-2 text-gray-900">
-                        {formatCurrency(result.data.document_data.loan_amount)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Interest Rate:</span>
-                      <span className="ml-2 text-gray-900">
-                        {formatPercentage(result.data.document_data.interest_rate)}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Property Address:</span>
-                      <span className="ml-2 text-gray-900">
-                        {result.data.document_data.property_address || '-'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Original Lender:</span>
-                      <span className="ml-2 text-gray-900">
-                        {result.data.document_data.original_lender || '-'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-600">Recording Date:</span>
-                      <span className="ml-2 text-gray-900">
-                        {formatDate(result.data.document_data.recording_date)}
-                      </span>
-                    </div>
-                  </div>
                 </div>
               )}
             </div>

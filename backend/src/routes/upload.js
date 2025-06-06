@@ -126,6 +126,37 @@ async function processFile(file) {
     
     const duplicates = dataValidator.detectDuplicates(validatedData, existingLoans);
 
+    // Automatically save validated loan data to database
+    const savedLoans = [];
+    const saveErrors = [];
+
+    for (const loanData of validatedData) {
+      try {
+        // Create or update loan
+        let loan;
+        if (loanData.loan_number) {
+          // Try to find existing loan by loan number
+          loan = await Loan.findOne({ where: { loan_number: loanData.loan_number } });
+          
+          if (loan) {
+            await loan.update(loanData);
+          } else {
+            loan = await Loan.create(loanData);
+          }
+        } else {
+          // Create new loan without loan number
+          loan = await Loan.create(loanData);
+        }
+
+        savedLoans.push(loan);
+      } catch (error) {
+        saveErrors.push({
+          data: loanData,
+          error: error.message
+        });
+      }
+    }
+
     // Update extraction log
     await extractionLog.update({
       status: 'completed',
@@ -133,7 +164,7 @@ async function processFile(file) {
       successful_extractions: validatedData.length,
       failed_extractions: validationErrors.length,
       missing_fields: processingResult.missingFields || [],
-      errors: validationErrors,
+      errors: [...validationErrors, ...saveErrors],
       processing_time_ms: Date.now() - startTime
     });
 
@@ -143,8 +174,11 @@ async function processFile(file) {
       totalRecords: processingResult.data.length,
       successfulExtractions: validatedData.length,
       failedExtractions: validationErrors.length,
-      data: validatedData,
+      loansCreated: savedLoans.length,
+      saveErrors: saveErrors.length,
+      data: savedLoans, // Return saved loan data with IDs
       validationErrors,
+      saveErrors,
       duplicateWarnings: duplicates,
       mappingConfidence: processingResult.mappingConfidence,
       processingTime: Date.now() - startTime,

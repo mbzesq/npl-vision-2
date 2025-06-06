@@ -116,6 +116,23 @@ const Loan = sequelize.define('Loan', {
     type: DataTypes.STRING(255),
     allowNull: true
   },
+  original_lender: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
+  assignment_chain: {
+    type: DataTypes.JSONB,
+    allowNull: true
+  },
+  chain_complete: {
+    type: DataTypes.BOOLEAN,
+    allowNull: true,
+    defaultValue: null
+  },
+  chain_issues: {
+    type: DataTypes.TEXT,
+    allowNull: true
+  },
   // Future-proofing columns
   servicing_data: {
     type: DataTypes.JSONB,

@@ -178,7 +178,9 @@ async function processFile(file) {
             const safeFields = {};
             ['borrower_name', 'co_borrower_name', 'property_address', 'property_city', 
              'property_state', 'property_zip', 'loan_amount', 'current_upb', 'interest_rate',
-             'loan_date', 'maturity_date', 'loan_number', 'investor_name'].forEach(field => {
+             'loan_date', 'maturity_date', 'loan_number', 'investor_name', 'servicer_name',
+             'monthly_payment', 'loan_type', 'property_type', 'document_types',
+             'original_lender', 'assignment_chain', 'chain_complete', 'chain_issues'].forEach(field => {
               if (updatedFields[field] !== undefined) {
                 safeFields[field] = updatedFields[field];
               }
@@ -209,7 +211,9 @@ async function processFile(file) {
             const safeFields = {};
             ['borrower_name', 'co_borrower_name', 'property_address', 'property_city', 
              'property_state', 'property_zip', 'loan_amount', 'current_upb', 'interest_rate',
-             'loan_date', 'maturity_date', 'loan_number', 'investor_name'].forEach(field => {
+             'loan_date', 'maturity_date', 'loan_number', 'investor_name', 'servicer_name',
+             'monthly_payment', 'loan_type', 'property_type', 'document_types',
+             'original_lender', 'assignment_chain', 'chain_complete', 'chain_issues'].forEach(field => {
               if (loanData[field] !== undefined) {
                 safeFields[field] = loanData[field];
               }

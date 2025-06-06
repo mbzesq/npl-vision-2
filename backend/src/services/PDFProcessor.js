@@ -1,5 +1,6 @@
 const pdfParse = require('pdf-parse');
 const OpenAI = require('openai');
+const AssignmentChainAnalyzer = require('./AssignmentChainAnalyzer');
 
 class PDFProcessor {
   constructor() {
@@ -12,6 +13,9 @@ class PDFProcessor {
       console.log('⚠️ OpenAI API key not configured - using mock responses');
       this.openai = null;
     }
+
+    // Initialize assignment chain analyzer
+    this.assignmentAnalyzer = new AssignmentChainAnalyzer();
 
     this.documentPrompts = {
       mortgage: `Extract loan information from this mortgage document.
@@ -134,6 +138,50 @@ class PDFProcessor {
         mergedLoanData.document_types = documentTypesString; // Store in the actual field
         mergedLoanData._document_types = documentTypesString; // Also keep for metadata
         console.log('📄 Document types detected across all chunks:', documentTypesString);
+
+        // Assignment chain analysis with robust error handling
+        if (documentTypesFound.has('Assignment of Mortgage') || documentTypesFound.has('Mortgage')) {
+          console.log('🔗 Starting assignment chain analysis...');
+          try {
+            // Ultra-aggressive timeout: 30 seconds max
+            const analysisPromise = this.assignmentAnalyzer.analyzeAssignmentChain(
+              textChunks.map((chunk, index) => ({ text: chunk, index })), 
+              Array.from(documentTypesFound)
+            );
+            
+            const timeoutPromise = new Promise((_, reject) => {
+              setTimeout(() => reject(new Error('Assignment analysis timeout - 30s limit')), 30000);
+            });
+            
+            const assignmentAnalysis = await Promise.race([analysisPromise, timeoutPromise]);
+            
+            // Add assignment chain data to loan
+            if (assignmentAnalysis.originalLender) {
+              mergedLoanData.original_lender = assignmentAnalysis.originalLender;
+            }
+            if (assignmentAnalysis.assignments && assignmentAnalysis.assignments.length > 0) {
+              mergedLoanData.assignment_chain = assignmentAnalysis.assignments;
+            }
+            if (assignmentAnalysis.chainComplete !== undefined) {
+              mergedLoanData.chain_complete = assignmentAnalysis.chainComplete;
+            }
+            if (assignmentAnalysis.chainIssues && assignmentAnalysis.chainIssues.length > 0) {
+              mergedLoanData.chain_issues = assignmentAnalysis.chainIssues.join('; ');
+            }
+            
+            console.log('🎯 Assignment chain analysis complete:', {
+              originalLender: assignmentAnalysis.originalLender,
+              assignmentCount: assignmentAnalysis.assignments?.length || 0,
+              chainComplete: assignmentAnalysis.chainComplete
+            });
+            
+          } catch (assignmentError) {
+            console.error('❌ Assignment chain analysis failed:', assignmentError.message);
+            mergedLoanData.chain_issues = `Analysis failed: ${assignmentError.message}`;
+            // Continue processing - don't let this break the upload
+          }
+        }
+
         console.log('📋 Final merged loan data:', JSON.stringify(mergedLoanData, null, 2));
         results.data.push(mergedLoanData);
       }
@@ -457,6 +505,11 @@ For any field not found, use null. Respond ONLY with valid JSON.`;
       investor_name: merged.investor_name || null,
       loan_type: merged.loan_type || null,
       property_type: merged.property_type || null,
+      // Assignment chain fields
+      original_lender: merged.original_lender || null,
+      assignment_chain: merged.assignment_chain || null,
+      chain_complete: merged.chain_complete || null,
+      chain_issues: merged.chain_issues || null,
       // Additional metadata
       _source: 'pdf',
       _extraction_method: 'comprehensive',
@@ -483,6 +536,24 @@ For any field not found, use null. Respond ONLY with valid JSON.`;
       investor_name: "Sample Bank",
       loan_type: "Conventional",
       property_type: "Single Family",
+      // Mock assignment chain data
+      original_lender: "First National Bank",
+      assignment_chain: [
+        {
+          assignor: "First National Bank",
+          assignee: "Second Trust Company",
+          assignmentDate: "2021-03-15",
+          recordingDate: "2021-03-20"
+        },
+        {
+          assignor: "Second Trust Company", 
+          assignee: "Sample Servicing Co",
+          assignmentDate: "2022-01-10",
+          recordingDate: "2022-01-15"
+        }
+      ],
+      chain_complete: true,
+      chain_issues: null,
       confidence: 0.8
     };
   }

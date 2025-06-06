@@ -199,6 +199,13 @@ ${text.substring(0, 8000)}`;
   containsAssignmentData(text) {
     const lowerText = text.toLowerCase();
     
+    // CRITICAL: Exclude mortgage originations that mention MERS
+    // These are not assignments, just the original mortgage setup
+    if (this.isMortgageOrigination(text)) {
+      console.log('🚫 Skipping mortgage origination - not an assignment');
+      return false;
+    }
+    
     // Look for various assignment indicators
     return (lowerText.includes('assignment') && lowerText.includes('mortgage')) ||
            lowerText.includes('assignment of deed') ||
@@ -206,6 +213,27 @@ ${text.substring(0, 8000)}`;
            lowerText.includes('assignor') ||
            lowerText.includes('assignee') ||
            (lowerText.includes('recorded') && lowerText.includes('instrument'));
+  }
+
+  isMortgageOrigination(text) {
+    const lowerText = text.toLowerCase();
+    
+    // Check for mortgage origination patterns
+    const isMortgageDoc = (lowerText.includes('mortgage') && lowerText.includes('deed')) ||
+                         lowerText.includes('deed of trust') ||
+                         lowerText.includes('security deed');
+    
+    // Check for borrower-to-MERS pattern (typical in originations)
+    const hasBorrowerMERSPattern = lowerText.includes('borrower') && lowerText.includes('mers');
+    
+    // Check for origination language
+    const hasOriginationLanguage = lowerText.includes('grants and conveys') ||
+                                  lowerText.includes('mortgagor') ||
+                                  lowerText.includes('mortgagee') ||
+                                  lowerText.includes('to secure payment');
+    
+    // If it's a mortgage document with borrower-to-MERS language, it's likely origination
+    return isMortgageDoc && (hasBorrowerMERSPattern || hasOriginationLanguage);
   }
 
   detectPOA(text) {
@@ -269,6 +297,12 @@ ${text.substring(0, 8000)}`;
   }
 
   async extractAssignmentDetails(text) {
+    // CRITICAL: Check if this is actually a mortgage origination, not an assignment
+    if (this.isMortgageOrigination(text)) {
+      console.log('🚫 Detected mortgage origination - skipping assignment extraction');
+      return null;
+    }
+
     if (!this.openai) {
       console.log('🔄 Using fallback assignment extraction (no OpenAI)');
       return this.extractAssignmentFallback(text);
@@ -391,6 +425,12 @@ ${text.substring(0, 8000)}`;
   }
 
   extractAssignmentFallback(text) {
+    // CRITICAL: Check if this is actually a mortgage origination, not an assignment
+    if (this.isMortgageOrigination(text)) {
+      console.log('🚫 Detected mortgage origination in fallback - skipping assignment extraction');
+      return null;
+    }
+    
     // Enhanced pattern matching for assignment documents with better MERS handling
     
     // First check for POA in the text
@@ -628,14 +668,30 @@ ${text.substring(0, 8000)}`;
 
     // Check first assignment connection to original lender
     const firstAssignment = enhancedAssignments[0];
-    if (originalLender && firstAssignment.effectiveAssignor) {
+    if (originalLender && firstAssignment) {
       const normalizedOriginal = this.getNormalizedName(originalLender);
-      const firstAssignorMatches = this.advancedNameMatch(normalizedOriginal, firstAssignment.assignor_normalized) ||
+      
+      // CRITICAL: Use POA principal or effective assignor for matching
+      const firstAssignorForMatching = firstAssignment.poa_principal || 
+                                      firstAssignment.effectiveAssignor || 
+                                      firstAssignment.assignor_normalized;
+      
+      const firstAssignorMatches = this.advancedNameMatch(normalizedOriginal, firstAssignorForMatching) ||
                                    this.isMERSNominee(firstAssignment.effectiveAssignor, originalLender);
       
       if (!firstAssignorMatches) {
-        issues.push(`Chain break: Original lender "${originalLender}" does not properly connect to first assignor "${firstAssignment.assignor_normalized}" (original: "${firstAssignment.assignor_original}")`);
-        isComplete = false;
+        // Only report as issue if we can't match through any method
+        const mersInfo = firstAssignment.assignor_mers_info;
+        if (mersInfo && mersInfo.effectiveName) {
+          const mersMatches = this.advancedNameMatch(normalizedOriginal, this.getNormalizedName(mersInfo.effectiveName));
+          if (!mersMatches) {
+            issues.push(`Chain break: Original lender "${originalLender}" does not connect to first assignor "${firstAssignorForMatching}" (MERS effective: "${mersInfo.effectiveName}")`);
+            isComplete = false;
+          }
+        } else {
+          issues.push(`Chain break: Original lender "${originalLender}" does not connect to first assignor "${firstAssignorForMatching}"`);
+          isComplete = false;
+        }
       }
     }
 
@@ -643,22 +699,41 @@ ${text.substring(0, 8000)}`;
     for (let i = 0; i < enhancedAssignments.length; i++) {
       const assignment = enhancedAssignments[i];
       
-      // Update current owner to normalized assignee name
-      if (assignment.assignee_normalized) {
-        currentOwner = assignment.assignee_normalized;
+      // CRITICAL: Update current owner using POA principal or normalized assignee
+      const effectiveAssignee = assignment.poa_principal || assignment.effectiveAssignee || assignment.assignee_normalized;
+      if (effectiveAssignee) {
+        currentOwner = effectiveAssignee;
       }
 
       // Check connection to next assignment
       if (i < enhancedAssignments.length - 1) {
         const nextAssignment = enhancedAssignments[i + 1];
         
-        if (assignment.assignee_normalized && nextAssignment.assignor_normalized) {
-          const matchConfidence = this.calculateSimilarity(assignment.assignee_normalized, nextAssignment.assignor_normalized);
-          const currentMatches = matchConfidence >= 0.9;
+        // CRITICAL: Use POA principals and effective parties for matching
+        const currentAssigneeForMatching = assignment.poa_principal || assignment.effectiveAssignee || assignment.assignee_normalized;
+        const nextAssignorForMatching = nextAssignment.poa_principal || nextAssignment.effectiveAssignor || nextAssignment.assignor_normalized;
+        
+        if (currentAssigneeForMatching && nextAssignorForMatching) {
+          const matchConfidence = this.calculateSimilarity(currentAssigneeForMatching, nextAssignorForMatching);
+          const currentMatches = matchConfidence >= 0.85; // Lowered threshold due to better normalization
           
           if (!currentMatches) {
-            issues.push(`Chain break: Assignee "${assignment.assignee_normalized}" does not match next assignor "${nextAssignment.assignor_normalized}" (confidence: ${Math.round(matchConfidence * 100)}%)`);
-            isComplete = false;
+            // Check if this is a POA situation that should be considered a match
+            const isPOAMatch = (assignment.poa_agent && nextAssignment.poa_principal) ||
+                              (assignment.poa_principal && nextAssignment.poa_agent);
+            
+            if (!isPOAMatch) {
+              // Check MERS passthrough
+              const mersMatch = this.checkMERSPassthrough(assignment, nextAssignment);
+              if (!mersMatch) {
+                issues.push(`Chain break: Assignee "${currentAssigneeForMatching}" does not match next assignor "${nextAssignorForMatching}" (confidence: ${Math.round(matchConfidence * 100)}%)`);
+                isComplete = false;
+              } else {
+                console.log(`✅ MERS passthrough match: ${currentAssigneeForMatching} → ${nextAssignorForMatching}`);
+              }
+            } else {
+              console.log(`✅ POA match: ${currentAssigneeForMatching} → ${nextAssignorForMatching}`);
+            }
           }
         }
       }
@@ -1016,23 +1091,29 @@ ${text.substring(0, 8000)}`;
     }
   }
 
+  checkMERSPassthrough(currentAssignment, nextAssignment) {
+    // Check if current assignee is MERS and next assignor is the effective party
+    if (currentAssignment.assignee_mers_info?.isMERS && currentAssignment.assignee_mers_info?.effectiveName) {
+      const mersEffective = this.getNormalizedName(currentAssignment.assignee_mers_info.effectiveName);
+      const nextAssignor = this.getNormalizedName(nextAssignment.assignor_normalized || nextAssignment.assignor_original);
+      return this.advancedNameMatch(mersEffective, nextAssignor);
+    }
+    
+    // Check if current assignor is MERS and we're matching to the effective party
+    if (nextAssignment.assignor_mers_info?.isMERS && nextAssignment.assignor_mers_info?.effectiveName) {
+      const mersEffective = this.getNormalizedName(nextAssignment.assignor_mers_info.effectiveName);
+      const currentAssignee = this.getNormalizedName(currentAssignment.assignee_normalized || currentAssignment.assignee_original);
+      return this.advancedNameMatch(currentAssignee, mersEffective);
+    }
+    
+    return false;
+  }
+
   namesMatch(name1, name2) {
     if (!name1 || !name2) return false;
     
-    // Normalize names for comparison
-    const normalize = (name) => name.toLowerCase()
-      .replace(/\s+/g, ' ')
-      .replace(/[.,]/g, '')
-      .trim();
-    
-    const norm1 = normalize(name1);
-    const norm2 = normalize(name2);
-    
-    // Exact match
-    if (norm1 === norm2) return true;
-    
-    // Check if one name contains the other (for cases like "Bank of America" vs "Bank of America, N.A.")
-    return norm1.includes(norm2) || norm2.includes(norm1);
+    // Use enhanced name matching
+    return this.advancedNameMatch(name1, name2);
   }
 }
 

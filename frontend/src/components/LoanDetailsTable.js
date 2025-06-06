@@ -15,11 +15,33 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
     if (!name) return '-'
     // Remove address information for cleaner display
     return name
-      .replace(/,\s*(?:at|located at)\s+.+$/i, '')
-      .replace(/,\s*\d{1,5}\s+[^,]+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|way|blvd|boulevard).*$/i, '')
-      .replace(/,\s*\d{5}(?:-\d{4})?(?:\s*,.*)?$/i, '')
-      .replace(/,\s*(?:attn|attention)\s*[#:]?\s*\d+.*$/i, '')
+      .replace(/,\s*(?:at|located at)\s+.+$/i, '') // Remove everything after "at" or "located at"
+      .replace(/,\s*\d{1,5}\s+[^,]+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|way|blvd|boulevard).*$/i, '') // Street addresses
+      .replace(/,\s*\d{5}(?:-\d{4})?(?:\s*,.*)?$/i, '') // ZIP codes
+      .replace(/,\s*(?:attn|attention)\s*[#:]?\s*\d+.*$/i, '') // Attention lines
+      .replace(/,\s*(?:its\s+)?successors\s+and\s+assigns.*$/i, '') // Legal boilerplate
+      .replace(/,\s*d\/b\/a.*$/i, '') // d/b/a clauses
+      .replace(/\s+/g, ' ') // Normalize whitespace
       .trim()
+  }
+
+  const getEffectivePartyName = (assignment, role) => {
+    if (role === 'assignor') {
+      // Use POA principal or MERS effective name if available
+      if (assignment.poa_principal) {
+        return stripAddressFromName(assignment.poa_principal)
+      }
+      if (assignment.assignor_mers_info?.effectiveName) {
+        return stripAddressFromName(assignment.assignor_mers_info.effectiveName)
+      }
+      return stripAddressFromName(assignment.assignor_normalized || assignment.assignor_name || assignment.assignor)
+    } else {
+      // assignee
+      if (assignment.assignee_mers_info?.effectiveName) {
+        return stripAddressFromName(assignment.assignee_mers_info.effectiveName)
+      }
+      return stripAddressFromName(assignment.assignee_normalized || assignment.assignee_name || assignment.assignee)
+    }
   }
 
   const formatPercentage = (value) => {
@@ -230,18 +252,28 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                             {/* Display assignor with clean POA context */}
                             {assignment.poa_agent && assignment.poa_principal ? (
                               <>
-                                <strong>{assignment.poa_principal}</strong>
+                                <strong>{stripAddressFromName(assignment.poa_principal)}</strong>
                                 <br />
                                 <small className="text-blue-600 font-normal">
-                                  (executed by {assignment.poa_agent} as Attorney-in-Fact)
+                                  (executed by {stripAddressFromName(assignment.poa_agent)} as Attorney-in-Fact)
                                 </small>
                               </>
                             ) : (
                               <span>{stripAddressFromName(assignment.assignor_normalized || assignment.assignor_name || assignment.assignor)}</span>
                             )}
                             <span className="mx-2">→</span>
-                            {/* Display assignee with clean formatting */}
-                            <span>{stripAddressFromName(assignment.assignee_normalized || assignment.assignee_name || assignment.assignee)}</span>
+                            {/* Display assignee with clean formatting and MERS handling */}
+                            {assignment.assignee_mers_info?.effectiveName ? (
+                              <>
+                                <strong>{stripAddressFromName(assignment.assignee_mers_info.effectiveName)}</strong>
+                                <br />
+                                <small className="text-green-600 font-normal">
+                                  (via MERS as nominee)
+                                </small>
+                              </>
+                            ) : (
+                              <span>{stripAddressFromName(assignment.assignee_normalized || assignment.assignee_name || assignment.assignee)}</span>
+                            )}
                           </p>
                           <div className="text-xs text-gray-500 space-x-4">
                             {(assignment.execution_date || assignment.assignmentDate) && (
@@ -253,21 +285,21 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                             {(assignment.mers_flag || assignment.assignor_mers_info?.isMERS || assignment.assignee_mers_info?.isMERS) && (
                               <span className="text-green-600">MERS Passthrough</span>
                             )}
-                            {/* Enhanced POA indicator with clean display */}
+                            {/* Enhanced indicators with clean display */}
                             {(assignment.poa_agent || assignment.poa_info?.isPOA || assignment.power_of_attorney_indicator) && (
                               <span className="text-blue-600">
-                                POA Principal: {assignment.poa_principal || assignment.poa_info?.principal || assignment.principal_name}
+                                POA Principal: {stripAddressFromName(assignment.poa_principal || assignment.poa_info?.principal || assignment.principal_name)}
                               </span>
                             )}
-                            {/* Show MERS passthrough status */}
+                            {/* Show MERS passthrough status with effective names */}
                             {assignment.assignor_mers_info?.effectiveName && (
                               <span className="text-green-600">
-                                MERS → {assignment.assignor_mers_info.effectiveName}
+                                MERS Assignor → {stripAddressFromName(assignment.assignor_mers_info.effectiveName)}
                               </span>
                             )}
                             {assignment.assignee_mers_info?.effectiveName && (
                               <span className="text-green-600">
-                                MERS → {assignment.assignee_mers_info.effectiveName}
+                                MERS Assignee → {stripAddressFromName(assignment.assignee_mers_info.effectiveName)}
                               </span>
                             )}
                             {assignment.confidence_score && assignment.confidence_score < 0.8 && (
@@ -304,17 +336,27 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                 {loan.chain_issues && (
                   <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
                     <p className="text-xs font-medium text-yellow-800 mb-1">Chain Issues:</p>
-                    <div className="text-xs text-yellow-700">
+                    <div className="text-xs">
                       {loan.chain_issues.split(';').map((issue, idx) => {
-                        // Check if this is a POA-related issue that should be shown as resolved
-                        const isPOAResolved = issue.includes('POA') || 
-                                            (issue.includes('does not match') && 
-                                             loan.assignment_chain?.some(a => a.poa_agent || a.poa_principal));
+                        const trimmedIssue = issue.trim();
+                        
+                        // Check for different types of resolutions
+                        const isPOAResolved = loan.assignment_chain?.some(a => 
+                          (a.poa_agent || a.poa_principal) && trimmedIssue.includes('does not match')
+                        );
+                        
+                        const isMERSResolved = loan.assignment_chain?.some(a => 
+                          (a.assignor_mers_info?.effectiveName || a.assignee_mers_info?.effectiveName) && 
+                          trimmedIssue.includes('does not match')
+                        );
+                        
+                        const isResolved = isPOAResolved || isMERSResolved;
                         
                         return (
-                          <div key={idx} className={isPOAResolved ? 'text-green-700' : 'text-yellow-700'}>
+                          <div key={idx} className={isResolved ? 'text-green-700' : 'text-yellow-700'}>
                             {isPOAResolved && '✓ Resolved via POA: '}
-                            {issue.trim()}
+                            {isMERSResolved && '✓ Resolved via MERS: '}
+                            {trimmedIssue}
                           </div>
                         );
                       })}

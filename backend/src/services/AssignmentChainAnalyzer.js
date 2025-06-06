@@ -208,11 +208,49 @@ ${text.substring(0, 8000)}`;
            (lowerText.includes('recorded') && lowerText.includes('instrument'));
   }
 
+  detectPOA(text) {
+    // Enhanced POA patterns to capture various legal phrasings
+    const poaPatterns = [
+      // "by [Agent] as attorney-in-fact for [Principal]"
+      /(?:by|executed by)\s+(?<agent>[\w\s,.\-']+?)\s*,?\s+(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF|agent)\s+(?:for|on behalf of)\s+(?<principal>[\w\s,.\-']+?)(?:,|\s*$|\s+(?:dated|executed|recorded))/i,
+      
+      // "[Principal] by [Agent] as attorney-in-fact"  
+      /(?<principal>[\w\s,.\-']+?)\s+by\s+(?<agent>[\w\s,.\-']+?)\s*,?\s*(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF|agent)(?:\s+for\s+[\w\s,.\-']+?)?(?:,|\s*$|\s+(?:dated|executed|recorded))/i,
+      
+      // "executed by [Agent] as AIF for [Principal]"
+      /executed\s+by\s+(?<agent>[\w\s,.\-']+?)\s*,?\s*(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF)\s+(?:for|on behalf of)\s+(?<principal>[\w\s,.\-']+?)(?:,|\s*$|\s+(?:dated|executed|recorded))/i,
+      
+      // "[Agent], as attorney-in-fact for [Principal]"
+      /(?<agent>[\w\s,.\-']+?)\s*,\s*(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF|agent)\s+(?:for|on behalf of)\s+(?<principal>[\w\s,.\-']+?)(?:,|\s*$|\s+(?:dated|executed|recorded))/i
+    ];
+
+    for (const pattern of poaPatterns) {
+      const match = text.match(pattern);
+      if (match?.groups?.agent && match?.groups?.principal) {
+        const agent = match.groups.agent.trim().replace(/,\s*$/, '');
+        const principal = match.groups.principal.trim().replace(/,\s*$/, '');
+        
+        console.log(`🔍 POA detected: Agent="${agent}", Principal="${principal}"`);
+        
+        return {
+          poa_agent: agent,
+          poa_principal: principal,
+          isPOA: true
+        };
+      }
+    }
+    
+    return null;
+  }
+
   async extractAssignmentDetails(text) {
     if (!this.openai) {
       console.log('🔄 Using fallback assignment extraction (no OpenAI)');
       return this.extractAssignmentFallback(text);
     }
+
+    // First detect POA relationships in the text
+    const poaInfo = this.detectPOA(text);
 
     const prompt = `Extract detailed assignment information from this Assignment of Mortgage document.
 
@@ -282,12 +320,41 @@ ${text.substring(0, 8000)}`;
       
       try {
         const assignment = JSON.parse(result);
+        
+        // Enhance with POA detection if not already detected by AI
+        if (poaInfo && !assignment.poa_agent) {
+          assignment.poa_agent = poaInfo.poa_agent;
+          assignment.poa_principal = poaInfo.poa_principal;
+          assignment.power_of_attorney_indicator = true;
+          
+          // If assignor contains POA language, use principal for normalized name
+          if (assignment.assignor_name && assignment.assignor_name.toLowerCase().includes('attorney')) {
+            assignment.assignor_normalized = this.getNormalizedName(poaInfo.poa_principal);
+            assignment.assignor_original = assignment.assignor_name;
+          }
+          
+          // If assignee contains POA language, use principal for normalized name  
+          if (assignment.assignee_name && assignment.assignee_name.toLowerCase().includes('attorney')) {
+            assignment.assignee_normalized = this.getNormalizedName(poaInfo.poa_principal);
+            assignment.assignee_original = assignment.assignee_name;
+          }
+        }
+        
         return assignment;
       } catch (parseError) {
         // Try to extract JSON from response
         const jsonMatch = result.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-          return JSON.parse(jsonMatch[0]);
+          const assignment = JSON.parse(jsonMatch[0]);
+          
+          // Apply POA enhancement to fallback parsing too
+          if (poaInfo && !assignment.poa_agent) {
+            assignment.poa_agent = poaInfo.poa_agent;
+            assignment.poa_principal = poaInfo.poa_principal;
+            assignment.power_of_attorney_indicator = true;
+          }
+          
+          return assignment;
         }
         throw new Error('Invalid JSON response');
       }
@@ -300,6 +367,9 @@ ${text.substring(0, 8000)}`;
 
   extractAssignmentFallback(text) {
     // Enhanced pattern matching for assignment documents with better MERS handling
+    
+    // First check for POA in the text
+    const poaInfo = this.detectPOA(text);
     
     // Look for various assignor patterns
     const assignorPatterns = [
@@ -355,7 +425,7 @@ ${text.substring(0, 8000)}`;
       }
     }
     
-    return {
+    const baseResult = {
       assignor_name: assignorMatch ? assignorMatch[1].trim() : null,
       assignee_name: assigneeMatch ? assigneeMatch[1].trim() : null,
       execution_date: dateMatch ? this.parseDate(dateMatch[1]) : null,
@@ -369,6 +439,27 @@ ${text.substring(0, 8000)}`;
       assignmentDate: dateMatch ? this.parseDate(dateMatch[1]) : null,
       recordingDate: recordedMatch ? this.parseDate(recordedMatch[1]) : null
     };
+    
+    // Enhance with POA detection if found
+    if (poaInfo && poaInfo.isPOA) {
+      baseResult.poa_agent = poaInfo.poa_agent;
+      baseResult.poa_principal = poaInfo.poa_principal;
+      baseResult.power_of_attorney_indicator = true;
+      
+      // If assignor contains POA language, use principal for normalized name
+      if (baseResult.assignor_name && baseResult.assignor_name.toLowerCase().includes('attorney')) {
+        baseResult.assignor_normalized = this.getNormalizedName(poaInfo.poa_principal);
+        baseResult.assignor_original = baseResult.assignor_name;
+      }
+      
+      // If assignee contains POA language, use principal for normalized name  
+      if (baseResult.assignee_name && baseResult.assignee_name.toLowerCase().includes('attorney')) {
+        baseResult.assignee_normalized = this.getNormalizedName(poaInfo.poa_principal);
+        baseResult.assignee_original = baseResult.assignee_name;
+      }
+    }
+    
+    return baseResult;
   }
 
   parseDate(dateString) {
@@ -439,21 +530,24 @@ ${text.substring(0, 8000)}`;
       // Analyze MERS roles for both assignor and assignee
       const assignorMersInfo = this.analyzeMERSRole(assignorOriginal);
       const assigneeMersInfo = this.analyzeMERSRole(assigneeOriginal);
-      const assignorPOAInfo = this.analyzePOARole(assignorOriginal, assignment.principal_name);
+      const assignorPOAInfo = this.analyzePOARole(assignorOriginal, assignment.principal_name || assignment.poa_principal);
+      const assigneePOAInfo = this.analyzePOARole(assigneeOriginal, assignment.principal_name || assignment.poa_principal);
       
       // CRITICAL FIX: Determine true effective parties (not MERS)
       let effectiveAssignor, effectiveAssignee;
       
-      // For assignor: Use true party name (not MERS)
+      // For assignor: Use true party name (not MERS, and principal for POA)
       if (assignorMersInfo.isMERS && assignorMersInfo.effectiveName) {
         effectiveAssignor = assignorMersInfo.effectiveName; // The true lender MERS represents
       } else if (assignorPOAInfo.isPOA && assignorPOAInfo.effectiveName) {
         effectiveAssignor = assignorPOAInfo.effectiveName; // The principal in POA relationship
+      } else if (assignment.poa_principal && assignorOriginal && assignorOriginal.toLowerCase().includes('attorney')) {
+        effectiveAssignor = assignment.poa_principal; // Use detected principal
       } else {
         effectiveAssignor = assignorOriginal;
       }
       
-      // For assignee: Use true party name (not MERS)  
+      // For assignee: Use true party name (not MERS, and principal for POA)  
       if (assigneeMersInfo.isMERS) {
         if (assigneeMersInfo.effectiveName) {
           // If MERS nominee says "Lender" instead of actual name, try to use original lender
@@ -466,6 +560,10 @@ ${text.substring(0, 8000)}`;
           // If MERS with no nominee info, but we know it's related to original lender
           effectiveAssignee = originalLender || assigneeOriginal;
         }
+      } else if (assigneePOAInfo.isPOA && assigneePOAInfo.effectiveName) {
+        effectiveAssignee = assigneePOAInfo.effectiveName; // The principal in POA relationship
+      } else if (assignment.poa_principal && assigneeOriginal && assigneeOriginal.toLowerCase().includes('attorney')) {
+        effectiveAssignee = assignment.poa_principal; // Use detected principal
       } else {
         effectiveAssignee = assigneeOriginal;
       }
@@ -488,7 +586,11 @@ ${text.substring(0, 8000)}`;
         assignor_mers_info: assignorMersInfo.isMERS ? assignorMersInfo : null,
         assignee_mers_info: assigneeMersInfo.isMERS ? assigneeMersInfo : null,
         mers_flag: assignorMersInfo.isMERS || assigneeMersInfo.isMERS,
-        poa_info: assignorPOAInfo.isPOA ? assignorPOAInfo : null,
+        assignor_poa_info: assignorPOAInfo.isPOA ? assignorPOAInfo : null,
+        assignee_poa_info: assigneePOAInfo.isPOA ? assigneePOAInfo : null,
+        poa_info: assignorPOAInfo.isPOA ? assignorPOAInfo : (assigneePOAInfo.isPOA ? assigneePOAInfo : null),
+        poa_agent: assignment.poa_agent || null,
+        poa_principal: assignment.poa_principal || null,
         
         // Add confidence scoring
         confidence_score: this.calculateAssignmentConfidence(assignment),

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import LoanDetailsTable from '@/components/LoanDetailsTable'
 
 export default function Dashboard() {
   const [stats, setStats] = useState({
@@ -9,7 +10,9 @@ export default function Dashboard() {
     totalDocuments: 0
   })
   const [recentLoans, setRecentLoans] = useState([])
+  const [allLoans, setAllLoans] = useState([])
   const [loading, setLoading] = useState(true)
+  const [showDetailedView, setShowDetailedView] = useState(false)
 
   useEffect(() => {
     loadDashboardData()
@@ -38,8 +41,9 @@ export default function Dashboard() {
         totalDocuments
       })
       
-      // Set recent loans (first 5)
+      // Set recent loans (first 5) and all loans
       setRecentLoans(loansData.loans?.slice(0, 5) || [])
+      setAllLoans(loansData.loans || [])
       
     } catch (error) {
       console.error('Error loading dashboard data:', error)
@@ -93,9 +97,23 @@ export default function Dashboard() {
         </div>
         
         <div className="mt-8 bg-white p-6 rounded-lg shadow">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Recent Loans</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900">
+              {showDetailedView ? 'Loan Details' : 'Recent Loans'}
+            </h3>
+            {allLoans.length > 0 && (
+              <button
+                onClick={() => setShowDetailedView(!showDetailedView)}
+                className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded"
+              >
+                {showDetailedView ? 'Show Summary' : 'Show Details'}
+              </button>
+            )}
+          </div>
           {loading ? (
             <p className="text-gray-500">Loading...</p>
+          ) : showDetailedView ? (
+            <LoanDetailsTable loans={allLoans} />
           ) : recentLoans.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">

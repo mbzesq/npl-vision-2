@@ -92,6 +92,22 @@ const Loan = sequelize.define('Loan', {
     type: DataTypes.STRING(255),
     allowNull: true
   },
+  servicer_name: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
+  monthly_payment: {
+    type: DataTypes.DECIMAL(15, 2),
+    allowNull: true
+  },
+  loan_type: {
+    type: DataTypes.STRING(50),
+    allowNull: true
+  },
+  property_type: {
+    type: DataTypes.STRING(50),
+    allowNull: true
+  },
   // Future-proofing columns
   servicing_data: {
     type: DataTypes.JSONB,

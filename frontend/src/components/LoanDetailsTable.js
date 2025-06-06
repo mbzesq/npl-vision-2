@@ -52,20 +52,8 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
         <div key={loan.id || index} className="bg-white p-6 rounded-lg shadow-md">
           <div className="flex justify-between items-start mb-4">
             <h3 className="text-lg font-semibold text-gray-900">
-              Loan #{loan.id} {loan.loan_number && `- ${loan.loan_number}`}
+              {loan.loan_number || `Loan #${loan.id}`}
             </h3>
-            <div className="flex items-center space-x-2">
-              <span className="text-xs text-gray-500">
-                Added {formatDate(loan.created_at)}
-                {loan.updated_at !== loan.created_at && ` • Updated ${formatDate(loan.updated_at)}`}
-              </span>
-              <button
-                onClick={() => handleDeleteLoan(loan.id)}
-                className="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded"
-              >
-                Delete
-              </button>
-            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -105,9 +93,9 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
               </div>
             </div>
 
-            {/* Loan Terms */}
+            {/* Origination Terms */}
             <div className="space-y-2">
-              <h4 className="text-sm font-medium text-gray-700 uppercase">Loan Terms</h4>
+              <h4 className="text-sm font-medium text-gray-700 uppercase">Origination Terms</h4>
               <div className="space-y-1">
                 <p className="text-sm">
                   <span className="text-gray-600">Original Amount:</span>
@@ -174,9 +162,9 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
               </div>
             </div>
 
-            {/* Additional Data */}
+            {/* Balance Information */}
             <div className="space-y-2">
-              <h4 className="text-sm font-medium text-gray-700 uppercase">Additional Info</h4>
+              <h4 className="text-sm font-medium text-gray-700 uppercase">Balance Information</h4>
               <div className="space-y-1">
                 <p className="text-sm">
                   <span className="text-gray-600">Accrued Interest:</span>
@@ -196,49 +184,35 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
 
           {/* Document Processing Info */}
           <div className="mt-4 pt-4 border-t border-gray-200">
-            <h4 className="text-sm font-medium text-gray-700 uppercase mb-2">Document Processing</h4>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-              <div>
-                <span className="text-gray-600">Data Source:</span>
-                <span className="ml-2 text-gray-900 capitalize">
-                  {loan._source === 'pdf' ? 'PDF Document Package' : loan._source || 'Unknown'}
-                </span>
-              </div>
-              <div>
-                <span className="text-gray-600">Extraction Method:</span>
-                <span className="ml-2 text-gray-900 capitalize">
-                  {loan._extraction_method === 'comprehensive' ? 'AI-Powered Analysis' : loan._extraction_method || 'Standard'}
-                </span>
-              </div>
-              {loan._chunks_processed && (
-                <div>
-                  <span className="text-gray-600">Document Sections:</span>
-                  <span className="ml-2 text-gray-900">
-                    {loan._chunks_processed} sections analyzed
-                  </span>
+            <div className="flex justify-between items-start">
+              <div className="flex-1">
+                <h4 className="text-sm font-medium text-gray-700 uppercase mb-2">Documents Reviewed</h4>
+                
+                {loan._document_types ? (
+                  <div className="flex flex-wrap gap-1">
+                    {loan._document_types.split(',').map((type, idx) => (
+                      <span key={idx} className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                        {type.trim()}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">Document types not identified</p>
+                )}
+                
+                <div className="mt-2 text-xs text-gray-500">
+                  Last Updated: {loan.updated_at ? formatDate(loan.updated_at) : formatDate(loan.created_at)}
+                  {loan._chunks_processed && ` • ${loan._chunks_processed} sections analyzed`}
                 </div>
-              )}
-              <div>
-                <span className="text-gray-600">Last Updated:</span>
-                <span className="ml-2 text-gray-900">
-                  {formatDate(loan.updated_at)}
-                </span>
               </div>
+              
+              <button
+                onClick={() => handleDeleteLoan(loan.id)}
+                className="text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded ml-4"
+              >
+                Delete
+              </button>
             </div>
-            
-            {/* Document Types Found (if available) */}
-            {loan._document_types && (
-              <div className="mt-2">
-                <span className="text-gray-600 text-xs">Document Types Identified:</span>
-                <div className="flex flex-wrap gap-1 mt-1">
-                  {loan._document_types.split(',').map((type, idx) => (
-                    <span key={idx} className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                      {type.trim()}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         </div>
       ))}

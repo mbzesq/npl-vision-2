@@ -100,10 +100,15 @@ class PDFProcessor {
       
       // Try to extract comprehensive loan data from all chunks
       const allExtractedData = [];
+      const documentTypesFound = new Set();
       
       for (let i = 0; i < textChunks.length; i++) {
         const chunk = textChunks[i];
         console.log(`🔍 Processing chunk ${i + 1}/${textChunks.length} (${chunk.length} chars)`);
+        
+        // Identify document types in this chunk
+        const docTypes = this.identifyDocumentTypes(chunk);
+        docTypes.forEach(type => documentTypesFound.add(type));
         
         // Use comprehensive extraction for each chunk
         const extractedData = await this.extractComprehensiveLoanData(chunk);
@@ -114,7 +119,8 @@ class PDFProcessor {
             type: 'loan_document',
             data: extractedData,
             confidence: extractedData.confidence || 0.8,
-            chunk: i + 1
+            chunk: i + 1,
+            documentTypes: docTypes
           });
         }
       }
@@ -122,6 +128,8 @@ class PDFProcessor {
       // Merge all extracted data into a single comprehensive loan record
       if (allExtractedData.length > 0) {
         const mergedLoanData = this.mergeExtractedData(allExtractedData);
+        // Add document types found
+        mergedLoanData._document_types = Array.from(documentTypesFound).join(', ');
         console.log('📋 Final merged loan data:', JSON.stringify(mergedLoanData, null, 2));
         results.data.push(mergedLoanData);
       }
@@ -277,6 +285,39 @@ class PDFProcessor {
       chunks.push(text.substring(i, i + chunkSize));
     }
     return chunks;
+  }
+
+  identifyDocumentTypes(text) {
+    const lowerText = text.toLowerCase();
+    const documentTypes = [];
+    
+    // Check for Note
+    if (lowerText.includes('promissory note') || 
+        (lowerText.includes('promise to pay') && lowerText.includes('note')) ||
+        lowerText.includes('borrower promises to pay')) {
+      documentTypes.push('Note');
+    }
+    
+    // Check for Mortgage
+    if ((lowerText.includes('mortgage') && lowerText.includes('deed')) ||
+        (lowerText.includes('deed of trust')) ||
+        (lowerText.includes('security deed')) ||
+        (lowerText.includes('mortgage') && lowerText.includes('security'))) {
+      documentTypes.push('Mortgage');
+    }
+    
+    // Check for Assignment
+    if (lowerText.includes('assignment') && lowerText.includes('mortgage')) {
+      documentTypes.push('Assignment of Mortgage');
+    }
+    
+    // Check for Allonge
+    if (lowerText.includes('allonge') || 
+        (lowerText.includes('endorsement') && lowerText.includes('note'))) {
+      documentTypes.push('Allonge');
+    }
+    
+    return documentTypes;
   }
 
   async extractComprehensiveLoanData(text) {

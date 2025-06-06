@@ -73,9 +73,9 @@ async function startServer() {
     await sequelize.authenticate();
     console.log('Database connection established successfully.');
     
-    // Sync database models
-    await sequelize.sync({ alter: true });
-    console.log('Database models synchronized.');
+    // Sync database models - force alter to add new columns
+    await sequelize.sync({ alter: true, force: false });
+    console.log('Database models synchronized with schema changes.');
     
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);

@@ -174,11 +174,16 @@ ${text.substring(0, 8000)}`;
         console.log(`🔍 Found assignment data in chunk ${i + 1}`);
         try {
           const assignment = await this.extractAssignmentDetails(chunk.text);
-          if (assignment && (assignment.assignor || assignment.assignee)) {
+          console.log(`📋 Chunk ${i + 1} assignment result:`, JSON.stringify(assignment, null, 2));
+          
+          if (assignment && (assignment.assignor_name || assignment.assignor || assignment.assignee_name || assignment.assignee)) {
             assignments.push({
               ...assignment,
               chunkIndex: i + 1
             });
+            console.log(`✅ Added assignment from chunk ${i + 1}`);
+          } else {
+            console.log(`❌ No valid assignment data found in chunk ${i + 1}`);
           }
         } catch (error) {
           console.error(`⚠️ Error extracting assignment from chunk ${i + 1}:`, error.message);
@@ -193,7 +198,14 @@ ${text.substring(0, 8000)}`;
 
   containsAssignmentData(text) {
     const lowerText = text.toLowerCase();
-    return lowerText.includes('assignment') && lowerText.includes('mortgage');
+    
+    // Look for various assignment indicators
+    return (lowerText.includes('assignment') && lowerText.includes('mortgage')) ||
+           lowerText.includes('assignment of deed') ||
+           lowerText.includes('assign') && (lowerText.includes('transfer') || lowerText.includes('convey')) ||
+           lowerText.includes('assignor') ||
+           lowerText.includes('assignee') ||
+           (lowerText.includes('recorded') && lowerText.includes('instrument'));
   }
 
   async extractAssignmentDetails(text) {

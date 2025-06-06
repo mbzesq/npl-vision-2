@@ -865,6 +865,10 @@ ${text.substring(0, 8000)}`;
         assignor_normalized: this.getNormalizedName(effectiveAssignor),
         assignee_normalized: this.getNormalizedName(effectiveAssignee),
         
+        // Store properly formatted names for UI display
+        assignor_display: this.formatProperName(effectiveAssignor),
+        assignee_display: this.formatProperName(effectiveAssignee),
+        
         // Store effective parties for validation
         effectiveAssignor: effectiveAssignor,
         effectiveAssignee: effectiveAssignee,
@@ -1047,6 +1051,112 @@ ${text.substring(0, 8000)}`;
       .trim();
     
     return normalized;
+  }
+
+  formatProperName(name) {
+    if (!name) return '';
+    
+    // First normalize to get clean base name
+    const normalized = this.getNormalizedName(name);
+    
+    // Convert to proper case with special handling for business entities
+    let formatted = normalized
+      .split(' ')
+      .map(word => {
+        // Handle special cases
+        const lowerWord = word.toLowerCase();
+        
+        // Keep certain words/abbreviations in specific formats
+        const specialCases = {
+          'llc': 'LLC',
+          'inc': 'Inc.',
+          'corp': 'Corp.',
+          'na': 'N.A.',
+          'lp': 'LP',
+          'pa': 'P.A.',
+          'pc': 'P.C.',
+          'pllc': 'PLLC',
+          'ltd': 'Ltd.',
+          'co': 'Co.',
+          'company': 'Company',
+          'corporation': 'Corporation',
+          'incorporated': 'Incorporated',
+          'limited': 'Limited',
+          'trust': 'Trust',
+          'bank': 'Bank',
+          'national': 'National',
+          'federal': 'Federal',
+          'savings': 'Savings',
+          'loan': 'Loan',
+          'mortgage': 'Mortgage',
+          'financial': 'Financial',
+          'credit': 'Credit',
+          'union': 'Union',
+          'america': 'America',
+          'american': 'American',
+          'united': 'United',
+          'states': 'States',
+          'home': 'Home',
+          'funding': 'Funding',
+          'capital': 'Capital',
+          'investment': 'Investment',
+          'advisors': 'Advisors',
+          'advisers': 'Advisers',
+          'partners': 'Partners',
+          'holdings': 'Holdings',
+          'group': 'Group',
+          'services': 'Services',
+          'servicing': 'Servicing',
+          'solutions': 'Solutions',
+          'management': 'Management',
+          'asset': 'Asset',
+          'real': 'Real',
+          'estate': 'Estate',
+          'properties': 'Properties',
+          'ventures': 'Ventures',
+          'enterprises': 'Enterprises'
+        };
+        
+        if (specialCases[lowerWord]) {
+          return specialCases[lowerWord];
+        }
+        
+        // Handle Roman numerals (I, II, III, IV, V)
+        if (/^[ivx]+$/i.test(word)) {
+          return word.toUpperCase();
+        }
+        
+        // Handle abbreviations that should be uppercase (like BCMB1)
+        if (/^[a-z0-9]{2,6}[0-9]?$/i.test(word) && word.length <= 6) {
+          return word.toUpperCase();
+        }
+        
+        // Standard title case for other words
+        return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+      })
+      .join(' ');
+    
+    // Fix common patterns
+    formatted = formatted
+      .replace(/\bOf\b/g, 'of')      // "Bank of America" not "Bank Of America"
+      .replace(/\bAnd\b/g, 'and')    // "Smith and Jones" not "Smith And Jones"
+      .replace(/\bThe\b/g, 'the')    // "The Bank" not "The Bank"
+      .replace(/\bFor\b/g, 'for')    // "Attorney for" not "Attorney For"
+      .replace(/\bAs\b/g, 'as')      // "MERS as nominee" not "MERS As Nominee"
+      .replace(/\bIn\b/g, 'in')      // "Attorney in Fact" not "Attorney In Fact"
+      .replace(/\bTo\b/g, 'to')      // "Successor to" not "Successor To"
+      .replace(/\bBy\b/g, 'by')      // "Executed by" not "Executed By"
+      
+      // Fix specific entity patterns
+      .replace(/\bN\.a\./g, 'N.A.')
+      .replace(/\bFsb\b/g, 'FSB')
+      .replace(/\bUsA\b/g, 'USA')
+      .replace(/\bU\.s\./g, 'U.S.')
+      
+      // Ensure first word is always capitalized
+      .replace(/^[a-z]/, char => char.toUpperCase());
+    
+    return formatted.trim();
   }
 
   getEffectiveParty(partyName, principalName = null) {

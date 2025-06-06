@@ -162,7 +162,7 @@ async function processFile(file) {
           } catch (updateError) {
             console.error('❌ Loan update failed:', updateError.message);
             console.error('Failed fields:', Object.keys(updatedFields));
-            // Try updating without the new fields
+            // Try updating without the new fields that might not exist
             const safeFields = {};
             ['borrower_name', 'co_borrower_name', 'property_address', 'property_city', 
              'property_state', 'property_zip', 'loan_amount', 'current_upb', 'interest_rate',
@@ -172,7 +172,7 @@ async function processFile(file) {
               }
             });
             await existingLoan.update(safeFields);
-            console.log('⚠️ Loan updated with safe fields only');
+            console.log('⚠️ Loan updated with basic fields only (missing new columns)');
           }
           
           loan = existingLoan;
@@ -193,7 +193,7 @@ async function processFile(file) {
           } catch (createError) {
             console.error('❌ Loan creation failed:', createError.message);
             console.error('Failed loan data:', Object.keys(loanData));
-            // Try creating with only safe fields
+            // Try creating with only safe fields (exclude new columns that might not exist)
             const safeFields = {};
             ['borrower_name', 'co_borrower_name', 'property_address', 'property_city', 
              'property_state', 'property_zip', 'loan_amount', 'current_upb', 'interest_rate',
@@ -203,7 +203,7 @@ async function processFile(file) {
               }
             });
             loan = await Loan.create(safeFields);
-            console.log('⚠️ Loan created with safe fields only');
+            console.log('⚠️ Loan created with basic fields only (missing new columns)');
             action = 'created';
           }
         }

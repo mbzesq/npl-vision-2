@@ -137,14 +137,33 @@ async function processFile(file) {
         let action = 'created';
         
         // Enhanced duplicate detection and prevention
-        const existingLoan = await this.findExistingLoan(loanData);
+        const existingLoan = await findExistingLoan(loanData);
         
         if (existingLoan) {
           // Update existing loan with new/better data
-          const updatedFields = this.mergeAndUpdateLoanData(existingLoan, loanData);
+          const updatedFields = mergeAndUpdateLoanData(existingLoan, loanData);
           console.log('🔄 Updating loan with fields:', Object.keys(updatedFields));
           console.log('📊 New data values:', updatedFields);
-          await existingLoan.update(updatedFields);
+          
+          try {
+            await existingLoan.update(updatedFields);
+            console.log('✅ Loan update successful');
+          } catch (updateError) {
+            console.error('❌ Loan update failed:', updateError.message);
+            console.error('Failed fields:', Object.keys(updatedFields));
+            // Try updating without the new fields
+            const safeFields = {};
+            ['borrower_name', 'co_borrower_name', 'property_address', 'property_city', 
+             'property_state', 'property_zip', 'loan_amount', 'current_upb', 'interest_rate',
+             'loan_date', 'maturity_date', 'loan_number', 'investor_name'].forEach(field => {
+              if (updatedFields[field] !== undefined) {
+                safeFields[field] = updatedFields[field];
+              }
+            });
+            await existingLoan.update(safeFields);
+            console.log('⚠️ Loan updated with safe fields only');
+          }
+          
           loan = existingLoan;
           action = 'updated';
           
@@ -152,7 +171,7 @@ async function processFile(file) {
             loanId: existingLoan.id,
             borrowerName: existingLoan.borrower_name,
             propertyAddress: existingLoan.property_address,
-            matchType: this.getMatchType(existingLoan, loanData),
+            matchType: getMatchType(existingLoan, loanData),
             fieldsUpdated: Object.keys(updatedFields)
           });
         } else {

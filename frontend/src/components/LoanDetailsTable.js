@@ -215,7 +215,7 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                         </div>
                         <div className="flex-1">
                           <p className="text-sm font-medium text-gray-900">
-                            Assignment {idx + 1}: {assignment.assignor_name || assignment.assignor} → {assignment.assignee_name || assignment.assignee}
+                            Assignment {idx + 1}: {assignment.assignor_normalized || assignment.assignor_name || assignment.assignor} → {assignment.assignee_normalized || assignment.assignee_name || assignment.assignee}
                           </p>
                           <div className="text-xs text-gray-500 space-x-4">
                             {(assignment.execution_date || assignment.assignmentDate) && (
@@ -224,8 +224,17 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                             {(assignment.recording_date || assignment.recordingDate) && (
                               <span>Recorded: {formatDate(assignment.recording_date || assignment.recordingDate)}</span>
                             )}
-                            {assignment.power_of_attorney_indicator && assignment.principal_name && (
+                            {assignment.mers_info?.isMERS && (
+                              <span className="text-green-600">MERS Nominee</span>
+                            )}
+                            {assignment.poa_info?.isPOA && assignment.poa_info.principal && (
+                              <span className="text-blue-600">POA: {assignment.poa_info.principal}</span>
+                            )}
+                            {assignment.power_of_attorney_indicator && assignment.principal_name && !assignment.poa_info && (
                               <span className="text-blue-600">POA: {assignment.principal_name}</span>
+                            )}
+                            {assignment.confidence_score && assignment.confidence_score < 0.8 && (
+                              <span className="text-orange-600">Low Confidence: {Math.round(assignment.confidence_score * 100)}%</span>
                             )}
                           </div>
                         </div>

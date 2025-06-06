@@ -53,7 +53,7 @@ class AssignmentChainAnalyzer {
     
     return {
       originalLender,
-      assignments: orderedAssignments,
+      assignments: chainValidation.enhancedAssignments || orderedAssignments,
       chainComplete: chainValidation.isComplete,
       chainIssues: chainValidation.issues,
       currentOwner: chainValidation.currentOwner
@@ -382,49 +382,78 @@ ${text.substring(0, 8000)}`;
       };
     }
 
-    // Normalize assignments for validation
-    const normalizedAssignments = orderedAssignments.map(assignment => ({
-      ...assignment,
-      normalizedAssignor: this.getNormalizedName(assignment.assignor_name || assignment.assignor),
-      normalizedAssignee: this.getNormalizedName(assignment.assignee_name || assignment.assignee),
-      effectiveAssignor: this.getEffectiveParty(assignment.assignor_name || assignment.assignor, assignment.principal_name),
-      effectiveAssignee: this.getEffectiveParty(assignment.assignee_name || assignment.assignee)
-    }));
+    // Enhance assignments with original, normalized, and effective party names
+    const enhancedAssignments = orderedAssignments.map((assignment, index) => {
+      const assignorOriginal = assignment.assignor_name || assignment.assignor;
+      const assigneeOriginal = assignment.assignee_name || assignment.assignee;
+      
+      // Handle MERS special case
+      const mersInfo = this.analyzeMERSRole(assignorOriginal);
+      const poaInfo = this.analyzePOARole(assignorOriginal, assignment.principal_name);
+      
+      // Determine effective parties for chain validation
+      const effectiveAssignor = mersInfo.effectiveName || poaInfo.effectiveName || assignorOriginal;
+      const effectiveAssignee = assignment.assignee_name || assignment.assignee;
+      
+      return {
+        ...assignment,
+        // Store original names for audit
+        assignor_original: assignorOriginal,
+        assignee_original: assigneeOriginal,
+        
+        // Store normalized names for display
+        assignor_normalized: this.getNormalizedName(effectiveAssignor),
+        assignee_normalized: this.getNormalizedName(effectiveAssignee),
+        
+        // Store effective parties for validation
+        effectiveAssignor: effectiveAssignor,
+        effectiveAssignee: effectiveAssignee,
+        
+        // Store special role information
+        mers_info: mersInfo.isMERS ? mersInfo : null,
+        poa_info: poaInfo.isPOA ? poaInfo : null,
+        
+        // Add confidence scoring
+        confidence_score: this.calculateAssignmentConfidence(assignment),
+        
+        // Add source information
+        source_page: assignment.chunkIndex || index + 1,
+        document_type: 'assignment_of_mortgage'
+      };
+    });
 
     // Check first assignment connection to original lender
-    const firstAssignment = normalizedAssignments[0];
+    const firstAssignment = enhancedAssignments[0];
     if (originalLender && firstAssignment.effectiveAssignor) {
       const normalizedOriginal = this.getNormalizedName(originalLender);
-      const firstAssignorMatches = this.advancedNameMatch(normalizedOriginal, firstAssignment.normalizedAssignor) ||
+      const firstAssignorMatches = this.advancedNameMatch(normalizedOriginal, firstAssignment.assignor_normalized) ||
                                    this.isMERSNominee(firstAssignment.effectiveAssignor, originalLender);
       
       if (!firstAssignorMatches) {
-        issues.push(`Chain break: Original lender "${originalLender}" does not properly connect to first assignor "${firstAssignment.effectiveAssignor}"`);
+        issues.push(`Chain break: Original lender "${originalLender}" does not properly connect to first assignor "${firstAssignment.assignor_normalized}" (original: "${firstAssignment.assignor_original}")`);
         isComplete = false;
       }
     }
 
     // Validate chain continuity with enhanced logic
-    for (let i = 0; i < normalizedAssignments.length; i++) {
-      const assignment = normalizedAssignments[i];
+    for (let i = 0; i < enhancedAssignments.length; i++) {
+      const assignment = enhancedAssignments[i];
       
-      // Update current owner
-      if (assignment.effectiveAssignee) {
-        currentOwner = assignment.effectiveAssignee;
+      // Update current owner to normalized assignee name
+      if (assignment.assignee_normalized) {
+        currentOwner = assignment.assignee_normalized;
       }
 
       // Check connection to next assignment
-      if (i < normalizedAssignments.length - 1) {
-        const nextAssignment = normalizedAssignments[i + 1];
+      if (i < enhancedAssignments.length - 1) {
+        const nextAssignment = enhancedAssignments[i + 1];
         
-        if (assignment.effectiveAssignee && nextAssignment.effectiveAssignor) {
-          const currentMatches = this.advancedNameMatch(
-            assignment.normalizedAssignee, 
-            nextAssignment.normalizedAssignor
-          );
+        if (assignment.assignee_normalized && nextAssignment.assignor_normalized) {
+          const matchConfidence = this.calculateSimilarity(assignment.assignee_normalized, nextAssignment.assignor_normalized);
+          const currentMatches = matchConfidence >= 0.9;
           
           if (!currentMatches) {
-            issues.push(`Chain break: Assignee "${assignment.effectiveAssignee}" does not match next assignor "${nextAssignment.effectiveAssignor}"`);
+            issues.push(`Chain break: Assignee "${assignment.assignee_normalized}" does not match next assignor "${nextAssignment.assignor_normalized}" (confidence: ${Math.round(matchConfidence * 100)}%)`);
             isComplete = false;
           }
         }
@@ -439,23 +468,46 @@ ${text.substring(0, 8000)}`;
     return {
       isComplete,
       currentOwner,
-      issues: issues.length > 0 ? issues : null
+      issues: issues.length > 0 ? issues : null,
+      enhancedAssignments
     };
   }
 
   getNormalizedName(name) {
     if (!name) return '';
     
-    return name.toLowerCase()
-      .replace(/\s+/g, ' ')
-      .replace(/[.,]/g, '')
-      .replace(/\bas trustee for.*$/i, '')
-      .replace(/\bsolely as nominee.*$/i, '')
+    let normalized = name.toLowerCase()
+      // Remove common boilerplate legal suffixes
+      .replace(/,?\s*its successors and\/or assigns?.*$/i, '')
+      .replace(/,?\s*its successors and assigns?.*$/i, '')
+      .replace(/,?\s*and\/or assigns?.*$/i, '')
+      .replace(/,?\s*and assigns?.*$/i, '')
+      .replace(/,?\s*its successors.*$/i, '')
+      .replace(/,?\s*their successors.*$/i, '')
+      .replace(/,?\s*successors in interest.*$/i, '')
+      .replace(/,?\s*their legal representatives.*$/i, '')
+      .replace(/,?\s*by and through its attorney-in-fact.*$/i, '')
+      .replace(/,?\s*acting through.*$/i, '')
+      .replace(/,?\s*as attorney-in-fact for.*$/i, '')
+      .replace(/,?\s*doing business as.*$/i, '')
+      .replace(/,?\s*d\/b\/a.*$/i, '')
+      .replace(/,?\s*solely as nominee.*$/i, '')
+      .replace(/,?\s*as trustee for.*$/i, '')
+      
+      // Normalize corporate suffixes
       .replace(/\bn\.?a\.?/gi, 'na')
       .replace(/\bcorp\.?/gi, 'corporation')
       .replace(/\bllc\.?/gi, 'llc')
       .replace(/\binc\.?/gi, 'incorporated')
+      .replace(/\bltd\.?/gi, 'limited')
+      .replace(/\bl\.?p\.?/gi, 'lp')
+      
+      // Clean up whitespace and punctuation
+      .replace(/\s+/g, ' ')
+      .replace(/[.,;]+$/, '')
       .trim();
+    
+    return normalized;
   }
 
   getEffectiveParty(partyName, principalName = null) {
@@ -565,12 +617,78 @@ ${text.substring(0, 8000)}`;
     return matrix[str2.length][str1.length];
   }
 
+  analyzeMERSRole(partyName) {
+    if (!partyName) return { isMERS: false };
+    
+    const lowerName = partyName.toLowerCase();
+    
+    // Look for MERS nominee patterns
+    const mersNomineeMatch = lowerName.match(/mers.*as nominee for (.+?)(?:,|$)/);
+    
+    if (mersNomineeMatch || lowerName.includes('mers')) {
+      return {
+        isMERS: true,
+        originalName: partyName,
+        effectiveName: mersNomineeMatch ? mersNomineeMatch[1].trim() : null,
+        role: 'nominee'
+      };
+    }
+    
+    return { isMERS: false };
+  }
+
+  analyzePOARole(partyName, principalName = null) {
+    if (!partyName) return { isPOA: false };
+    
+    const lowerName = partyName.toLowerCase();
+    const isPOA = lowerName.includes('attorney-in-fact') || 
+                  lowerName.includes('attorney in fact') ||
+                  lowerName.includes(' aif ') ||
+                  lowerName.includes(' poa ');
+    
+    if (isPOA) {
+      // Extract principal from the text if not provided
+      let extractedPrincipal = principalName;
+      if (!extractedPrincipal) {
+        const principalMatch = partyName.match(/attorney-in-fact for (.+?)(?:,|$)/i);
+        if (principalMatch) {
+          extractedPrincipal = principalMatch[1].trim();
+        }
+      }
+      
+      return {
+        isPOA: true,
+        originalName: partyName,
+        effectiveName: extractedPrincipal,
+        agent: partyName.split(/attorney-in-fact|aif|poa/i)[0].trim(),
+        principal: extractedPrincipal
+      };
+    }
+    
+    return { isPOA: false };
+  }
+
+  calculateAssignmentConfidence(assignment) {
+    let confidence = 1.0;
+    
+    // Reduce confidence for missing data
+    if (!assignment.execution_date && !assignment.assignmentDate) confidence -= 0.2;
+    if (!assignment.recording_date && !assignment.recordingDate) confidence -= 0.1;
+    if (!assignment.instrument_number) confidence -= 0.1;
+    
+    // Reduce confidence for incomplete names
+    if (!assignment.assignor_name && !assignment.assignor) confidence -= 0.3;
+    if (!assignment.assignee_name && !assignment.assignee) confidence -= 0.3;
+    
+    return Math.max(0.1, confidence);
+  }
+
   validateAssignmentData(assignment, index, issues) {
-    if (!assignment.assignor_name && !assignment.assignor) {
+    if (!assignment.assignor_original && !assignment.assignor_name && !assignment.assignor) {
       issues.push(`Assignment ${index}: Missing assignor name`);
     }
     
-    if (!assignment.assignee_name && !assignment.assignee) {
+    if (!assignment.assignee_original && !assignment.assignee_name && !assignment.assignee) {
       issues.push(`Assignment ${index}: Missing assignee name`);
     }
     
@@ -578,8 +696,12 @@ ${text.substring(0, 8000)}`;
       issues.push(`Assignment ${index}: Missing execution date`);
     }
     
-    if (assignment.power_of_attorney_indicator && !assignment.principal_name) {
+    if (assignment.power_of_attorney_indicator && !assignment.principal_name && !assignment.poa_info?.principal) {
       issues.push(`Assignment ${index}: Power of attorney used but principal name not identified`);
+    }
+    
+    if (assignment.confidence_score < 0.7) {
+      issues.push(`Assignment ${index}: Low confidence score (${Math.round(assignment.confidence_score * 100)}%) - manual review recommended`);
     }
   }
 

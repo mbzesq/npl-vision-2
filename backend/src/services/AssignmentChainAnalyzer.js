@@ -63,8 +63,8 @@ class AssignmentChainAnalyzer {
   async extractOriginalLender(chunks, documentTypes) {
     console.log('🏦 Extracting original lender from mortgage documents...');
     
-    // Limit to first 2 chunks to avoid long processing  
-    const chunksToProcess = chunks.slice(0, 2);
+    // Process first 3 chunks to capture all assignments  
+    const chunksToProcess = chunks.slice(0, 3);
     
     for (const chunk of chunksToProcess) {
       if (this.containsMortgageData(chunk.text)) {
@@ -165,8 +165,8 @@ ${text.substring(0, 8000)}`;
     console.log('📄 Extracting assignment documents...');
     const assignments = [];
 
-    // Limit to first 2 chunks to avoid excessive processing
-    const chunksToProcess = chunks.slice(0, 2);
+    // Process first 4 chunks to capture all assignments
+    const chunksToProcess = chunks.slice(0, 4);
 
     for (let i = 0; i < chunksToProcess.length; i++) {
       const chunk = chunksToProcess[i];
@@ -202,24 +202,36 @@ ${text.substring(0, 8000)}`;
       return this.extractAssignmentFallback(text);
     }
 
-    const prompt = `Extract assignment information from this document.
+    const prompt = `Extract detailed assignment information from this Assignment of Mortgage document.
 
-Find:
-- Assignor (who is transferring)
-- Assignee (who is receiving)  
-- Assignment date
-- Recording date
+Extract these fields:
+1. assignor_name: The party transferring the mortgage
+2. assignee_name: The party receiving the mortgage
+3. execution_date: When the assignment was signed (YYYY-MM-DD)
+4. recording_date: When recorded at county (YYYY-MM-DD)
+5. instrument_number: Recording/document number if mentioned
+6. power_of_attorney_indicator: true if "attorney-in-fact", "AIF", or "POA" appears
+7. principal_name: If POA is used, who is the principal (e.g., "Deutsche Bank" if "Ocwen as attorney-in-fact for Deutsche Bank")
+
+IMPORTANT RULES:
+- If you see "MERS as nominee for [Company]", treat [Company] as the true assignor
+- If you see "attorney-in-fact for [Principal]", extract [Principal] as principal_name
+- Look for dates near "Dated:", "Executed:", "Date of Assignment:"
+- Look for recording info near "Recorded:", "Filed:", "Instrument No:"
 
 Return JSON:
 {
-  "assignor": "name",
-  "assignee": "name", 
-  "assignmentDate": "YYYY-MM-DD or null",
-  "recordingDate": "YYYY-MM-DD or null"
+  "assignor_name": "exact name",
+  "assignee_name": "exact name",
+  "execution_date": "YYYY-MM-DD or null",
+  "recording_date": "YYYY-MM-DD or null", 
+  "instrument_number": "number or null",
+  "power_of_attorney_indicator": true/false,
+  "principal_name": "name if POA, otherwise null"
 }
 
 Document text:
-${text.substring(0, 6000)}`;
+${text.substring(0, 8000)}`;
 
     try {
       // Add timeout to OpenAI call
@@ -265,41 +277,81 @@ ${text.substring(0, 6000)}`;
   }
 
   extractAssignmentFallback(text) {
-    // Basic pattern matching for assignment documents
+    // Enhanced pattern matching for assignment documents
     const assignorMatch = text.match(/assignor[:\s]*([^,\n]+)/i);
     const assigneeMatch = text.match(/assignee[:\s]*([^,\n]+)/i);
+    const dateMatch = text.match(/dated?\s*:?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i);
+    const recordedMatch = text.match(/recorded?\s*:?\s*([0-9]{1,2}[\/\-][0-9]{1,2}[\/\-][0-9]{2,4})/i);
+    const instrumentMatch = text.match(/instrument\s*(?:no\.?|number)\s*:?\s*([0-9\-]+)/i);
+    const poaIndicator = /attorney.?in.?fact|aif\b|power.?of.?attorney/i.test(text);
+    
+    // Extract principal name if POA is detected
+    let principalName = null;
+    if (poaIndicator) {
+      const principalMatch = text.match(/attorney.?in.?fact\s+for\s+([^,\n]+)/i);
+      if (principalMatch) {
+        principalName = principalMatch[1].trim();
+      }
+    }
     
     return {
+      assignor_name: assignorMatch ? assignorMatch[1].trim() : null,
+      assignee_name: assigneeMatch ? assigneeMatch[1].trim() : null,
+      execution_date: dateMatch ? this.parseDate(dateMatch[1]) : null,
+      recording_date: recordedMatch ? this.parseDate(recordedMatch[1]) : null,
+      instrument_number: instrumentMatch ? instrumentMatch[1].trim() : null,
+      power_of_attorney_indicator: poaIndicator,
+      principal_name: principalName,
+      // Legacy fields for compatibility
       assignor: assignorMatch ? assignorMatch[1].trim() : null,
       assignee: assigneeMatch ? assigneeMatch[1].trim() : null,
-      assignmentDate: null,
-      recordingDate: null,
-      mortgageDate: null
+      assignmentDate: dateMatch ? this.parseDate(dateMatch[1]) : null,
+      recordingDate: recordedMatch ? this.parseDate(recordedMatch[1]) : null
     };
   }
 
+  parseDate(dateString) {
+    if (!dateString) return null;
+    
+    try {
+      // Handle various date formats
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) return null;
+      
+      return date.toISOString().split('T')[0]; // Return YYYY-MM-DD format
+    } catch (error) {
+      return null;
+    }
+  }
+
   orderAssignmentsChronologically(assignments) {
-    console.log('📅 Ordering assignments chronologically...');
+    console.log('📅 Ordering assignments chronologically by execution date...');
     
     return assignments.sort((a, b) => {
-      // Primary sort by assignment date
-      const dateA = a.assignmentDate ? new Date(a.assignmentDate) : new Date('1900-01-01');
-      const dateB = b.assignmentDate ? new Date(b.assignmentDate) : new Date('1900-01-01');
+      // Primary sort by execution date (business rule: execution takes precedence)
+      const dateA = a.execution_date || a.assignmentDate;
+      const dateB = b.execution_date || b.assignmentDate;
       
-      if (dateA.getTime() !== dateB.getTime()) {
-        return dateA.getTime() - dateB.getTime();
+      const parsedDateA = dateA ? new Date(dateA) : new Date('1900-01-01');
+      const parsedDateB = dateB ? new Date(dateB) : new Date('1900-01-01');
+      
+      if (parsedDateA.getTime() !== parsedDateB.getTime()) {
+        return parsedDateA.getTime() - parsedDateB.getTime();
       }
       
-      // Secondary sort by recording date if assignment dates are equal
-      const recordA = a.recordingDate ? new Date(a.recordingDate) : dateA;
-      const recordB = b.recordingDate ? new Date(b.recordingDate) : dateB;
+      // Secondary sort by recording date if execution dates are equal
+      const recordA = a.recording_date || a.recordingDate;
+      const recordB = b.recording_date || b.recordingDate;
       
-      return recordA.getTime() - recordB.getTime();
+      const parsedRecordA = recordA ? new Date(recordA) : parsedDateA;
+      const parsedRecordB = recordB ? new Date(recordB) : parsedDateB;
+      
+      return parsedRecordA.getTime() - parsedRecordB.getTime();
     });
   }
 
   validateAssignmentChain(originalLender, orderedAssignments) {
-    console.log('🔗 Validating assignment chain...');
+    console.log('🔗 Validating assignment chain with enhanced business logic...');
     
     const issues = [];
     let currentOwner = originalLender;
@@ -311,7 +363,6 @@ ${text.substring(0, 6000)}`;
     }
 
     if (orderedAssignments.length === 0) {
-      // No assignments found - current owner is original lender
       return {
         isComplete: originalLender ? true : false,
         currentOwner: originalLender,
@@ -319,55 +370,205 @@ ${text.substring(0, 6000)}`;
       };
     }
 
-    // Check if first assignment starts with original lender
-    const firstAssignment = orderedAssignments[0];
-    if (originalLender && firstAssignment.assignor) {
-      if (!this.namesMatch(originalLender, firstAssignment.assignor)) {
-        issues.push(`Chain break: Original lender "${originalLender}" does not match first assignor "${firstAssignment.assignor}"`);
+    // Normalize assignments for validation
+    const normalizedAssignments = orderedAssignments.map(assignment => ({
+      ...assignment,
+      normalizedAssignor: this.getNormalizedName(assignment.assignor_name || assignment.assignor),
+      normalizedAssignee: this.getNormalizedName(assignment.assignee_name || assignment.assignee),
+      effectiveAssignor: this.getEffectiveParty(assignment.assignor_name || assignment.assignor, assignment.principal_name),
+      effectiveAssignee: this.getEffectiveParty(assignment.assignee_name || assignment.assignee)
+    }));
+
+    // Check first assignment connection to original lender
+    const firstAssignment = normalizedAssignments[0];
+    if (originalLender && firstAssignment.effectiveAssignor) {
+      const normalizedOriginal = this.getNormalizedName(originalLender);
+      const firstAssignorMatches = this.advancedNameMatch(normalizedOriginal, firstAssignment.normalizedAssignor) ||
+                                   this.isMERSNominee(firstAssignment.effectiveAssignor, originalLender);
+      
+      if (!firstAssignorMatches) {
+        issues.push(`Chain break: Original lender "${originalLender}" does not properly connect to first assignor "${firstAssignment.effectiveAssignor}"`);
         isComplete = false;
       }
     }
 
-    // Check chain continuity (A→B, B→C pattern)
-    for (let i = 0; i < orderedAssignments.length; i++) {
-      const assignment = orderedAssignments[i];
+    // Validate chain continuity with enhanced logic
+    for (let i = 0; i < normalizedAssignments.length; i++) {
+      const assignment = normalizedAssignments[i];
       
-      // Update current owner to assignee
-      if (assignment.assignee) {
-        currentOwner = assignment.assignee;
+      // Update current owner
+      if (assignment.effectiveAssignee) {
+        currentOwner = assignment.effectiveAssignee;
       }
 
-      // Check if this assignment connects to the next one
-      if (i < orderedAssignments.length - 1) {
-        const nextAssignment = orderedAssignments[i + 1];
+      // Check connection to next assignment
+      if (i < normalizedAssignments.length - 1) {
+        const nextAssignment = normalizedAssignments[i + 1];
         
-        if (assignment.assignee && nextAssignment.assignor) {
-          if (!this.namesMatch(assignment.assignee, nextAssignment.assignor)) {
-            issues.push(`Chain break: Assignee "${assignment.assignee}" does not match next assignor "${nextAssignment.assignor}"`);
+        if (assignment.effectiveAssignee && nextAssignment.effectiveAssignor) {
+          const currentMatches = this.advancedNameMatch(
+            assignment.normalizedAssignee, 
+            nextAssignment.normalizedAssignor
+          );
+          
+          if (!currentMatches) {
+            issues.push(`Chain break: Assignee "${assignment.effectiveAssignee}" does not match next assignor "${nextAssignment.effectiveAssignor}"`);
             isComplete = false;
           }
         }
       }
 
-      // Check for missing data
-      if (!assignment.assignor) {
-        issues.push(`Assignment ${i + 1}: Missing assignor`);
-        isComplete = false;
-      }
-      
-      if (!assignment.assignee) {
-        issues.push(`Assignment ${i + 1}: Missing assignee`);
-        isComplete = false;
-      }
+      // Validate data completeness
+      this.validateAssignmentData(assignment, i + 1, issues);
     }
 
-    console.log(`🎯 Chain validation complete. Complete: ${isComplete}, Issues: ${issues.length}`);
+    console.log(`🎯 Enhanced chain validation complete. Complete: ${isComplete}, Issues: ${issues.length}`);
 
     return {
       isComplete,
       currentOwner,
       issues: issues.length > 0 ? issues : null
     };
+  }
+
+  getNormalizedName(name) {
+    if (!name) return '';
+    
+    return name.toLowerCase()
+      .replace(/\s+/g, ' ')
+      .replace(/[.,]/g, '')
+      .replace(/\bas trustee for.*$/i, '')
+      .replace(/\bsolely as nominee.*$/i, '')
+      .replace(/\bn\.?a\.?/gi, 'na')
+      .replace(/\bcorp\.?/gi, 'corporation')
+      .replace(/\bllc\.?/gi, 'llc')
+      .replace(/\binc\.?/gi, 'incorporated')
+      .trim();
+  }
+
+  getEffectiveParty(partyName, principalName = null) {
+    if (!partyName) return null;
+    
+    // If POA is used, use the principal name for chain validation
+    if (principalName && this.isPowerOfAttorney(partyName)) {
+      return principalName;
+    }
+    
+    // Handle MERS nominee situations
+    const mersNominee = this.extractMERSNominee(partyName);
+    if (mersNominee) {
+      return mersNominee;
+    }
+    
+    return partyName;
+  }
+
+  isPowerOfAttorney(partyName) {
+    if (!partyName) return false;
+    const lower = partyName.toLowerCase();
+    return lower.includes('attorney-in-fact') || 
+           lower.includes('attorney in fact') ||
+           lower.includes(' aif ') ||
+           lower.includes(' poa ');
+  }
+
+  extractMERSNominee(partyName) {
+    if (!partyName) return null;
+    const lower = partyName.toLowerCase();
+    
+    // Look for "MERS as nominee for [Company]" pattern
+    const mersMatch = lower.match(/mers.*as nominee for (.+?)(?:,|$)/);
+    if (mersMatch) {
+      return mersMatch[1].trim();
+    }
+    
+    return null;
+  }
+
+  isMERSNominee(assignorName, originalLender) {
+    if (!assignorName || !originalLender) return false;
+    
+    const nominee = this.extractMERSNominee(assignorName);
+    if (nominee) {
+      return this.advancedNameMatch(
+        this.getNormalizedName(nominee),
+        this.getNormalizedName(originalLender)
+      );
+    }
+    
+    return false;
+  }
+
+  advancedNameMatch(name1, name2) {
+    if (!name1 || !name2) return false;
+    
+    // Exact match
+    if (name1 === name2) return true;
+    
+    // Fuzzy match with 90% similarity threshold
+    const similarity = this.calculateSimilarity(name1, name2);
+    if (similarity >= 0.9) return true;
+    
+    // Containment match (for cases like "Bank of America" vs "Bank of America, N.A.")
+    if (name1.includes(name2) || name2.includes(name1)) return true;
+    
+    return false;
+  }
+
+  calculateSimilarity(str1, str2) {
+    const longer = str1.length > str2.length ? str1 : str2;
+    const shorter = str1.length > str2.length ? str2 : str1;
+    
+    if (longer.length === 0) return 1.0;
+    
+    const editDistance = this.levenshteinDistance(longer, shorter);
+    return (longer.length - editDistance) / longer.length;
+  }
+
+  levenshteinDistance(str1, str2) {
+    const matrix = [];
+    
+    for (let i = 0; i <= str2.length; i++) {
+      matrix[i] = [i];
+    }
+    
+    for (let j = 0; j <= str1.length; j++) {
+      matrix[0][j] = j;
+    }
+    
+    for (let i = 1; i <= str2.length; i++) {
+      for (let j = 1; j <= str1.length; j++) {
+        if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          );
+        }
+      }
+    }
+    
+    return matrix[str2.length][str1.length];
+  }
+
+  validateAssignmentData(assignment, index, issues) {
+    if (!assignment.assignor_name && !assignment.assignor) {
+      issues.push(`Assignment ${index}: Missing assignor name`);
+    }
+    
+    if (!assignment.assignee_name && !assignment.assignee) {
+      issues.push(`Assignment ${index}: Missing assignee name`);
+    }
+    
+    if (!assignment.execution_date && !assignment.assignmentDate) {
+      issues.push(`Assignment ${index}: Missing execution date`);
+    }
+    
+    if (assignment.power_of_attorney_indicator && !assignment.principal_name) {
+      issues.push(`Assignment ${index}: Power of attorney used but principal name not identified`);
+    }
   }
 
   namesMatch(name1, name2) {

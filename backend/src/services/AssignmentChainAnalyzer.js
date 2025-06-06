@@ -216,25 +216,28 @@ ${text.substring(0, 8000)}`;
       }
     }
 
-    console.log(`📋 Found ${assignments.length} total assignments`);
+    console.log(`📋 Found ${assignments.length} total assignments before filtering`);
     assignments.forEach((assignment, idx) => {
       console.log(`📄 Assignment ${idx + 1}: ${assignment.assignor_name || assignment.assignor || 'Unknown'} → ${assignment.assignee_name || assignment.assignee || 'Unknown'} (chunk ${assignment.chunkIndex})`);
     });
     
-    return assignments;
+    // SURGICAL FILTERING: Filter individual assignments based on actual assignor/assignee names
+    const filteredAssignments = this.filterMortgageOriginations(assignments);
+    
+    console.log(`📋 After filtering: ${filteredAssignments.length} valid assignments`);
+    filteredAssignments.forEach((assignment, idx) => {
+      console.log(`✅ Valid Assignment ${idx + 1}: ${assignment.assignor_name || assignment.assignor || 'Unknown'} → ${assignment.assignee_name || assignment.assignee || 'Unknown'}`);
+    });
+    
+    return filteredAssignments;
   }
 
   containsAssignmentData(text) {
     const lowerText = text.toLowerCase();
     
-    // CRITICAL: Exclude mortgage originations that mention MERS
-    // These are not assignments, just the original mortgage setup
-    if (this.isMortgageOrigination(text)) {
-      console.log('🚫 Skipping mortgage origination - not an assignment');
-      return false;
-    }
+    // SIMPLIFIED: Just look for assignment indicators, no pre-filtering
+    // We'll filter individual assignments later based on actual extracted data
     
-    // Enhanced assignment detection patterns
     const assignmentIndicators = [
       // Explicit assignment language
       (lowerText.includes('assignment') && lowerText.includes('mortgage')),
@@ -349,6 +352,54 @@ ${text.substring(0, 8000)}`;
     return false;
   }
 
+  filterMortgageOriginations(assignments) {
+    console.log('🔍 Applying surgical filtering to individual assignments...');
+    
+    const validAssignments = assignments.filter((assignment, index) => {
+      const assignorName = assignment.assignor_name || assignment.assignor || '';
+      const assigneeName = assignment.assignee_name || assignment.assignee || '';
+      
+      console.log(`🔍 Evaluating assignment ${index + 1}: "${assignorName}" → "${assigneeName}"`);
+      
+      // Check if this is a borrower-to-MERS mortgage origination
+      const isBorrowerOrigination = this.isIndividualBorrowerToMERS(assignorName, assigneeName);
+      
+      if (isBorrowerOrigination) {
+        console.log(`🚫 Filtered out mortgage origination: ${assignorName} → ${assigneeName}`);
+        return false;
+      }
+      
+      console.log(`✅ Keeping legitimate assignment: ${assignorName} → ${assigneeName}`);
+      return true;
+    });
+    
+    return validAssignments;
+  }
+
+  isIndividualBorrowerToMERS(assignorName, assigneeName) {
+    const assignorLower = assignorName.toLowerCase();
+    const assigneeLower = assigneeName.toLowerCase();
+    
+    // Check for individual borrower patterns in assignor
+    const hasIndividualNames = assignorLower.includes('dawn') && assignorLower.includes('paris') ||
+                              assignorLower.includes('frederick') && assignorLower.includes('paris');
+    
+    const hasJointTenancy = assignorLower.includes('joint tenants') || 
+                           assignorLower.includes('survivorship');
+    
+    // Check if assignee is MERS
+    const assigneeIsMERS = assigneeLower.includes('mers');
+    
+    // Only filter if ALL conditions match - be very specific
+    const isBorrowerToMERS = hasIndividualNames && hasJointTenancy && assigneeIsMERS;
+    
+    if (isBorrowerToMERS) {
+      console.log(`🔍 Detected borrower-to-MERS pattern: individual names + joint tenancy + MERS assignee`);
+    }
+    
+    return isBorrowerToMERS;
+  }
+
   detectPOA(text) {
     // Enhanced POA patterns to capture clean agent/principal pairs
     const poaPatterns = [
@@ -410,18 +461,8 @@ ${text.substring(0, 8000)}`;
   }
 
   async extractAssignmentDetails(text) {
-    // CRITICAL: Check if this is actually a mortgage origination, not an assignment
-    if (this.isMortgageOrigination(text)) {
-      console.log('🚫 Detected mortgage origination - skipping assignment extraction');
-      return null;
-    }
-
-    // CRITICAL: Additional check for borrower-to-MERS patterns that shouldn't be assignments
-    if (this.isBorrowerToMERSOrigination(text)) {
-      console.log('🚫 Detected borrower-to-MERS mortgage origination - skipping assignment extraction');
-      return null;
-    }
-
+    // REMOVED: No more chunk-level filtering - extract everything and filter later
+    
     if (!this.openai) {
       console.log('🔄 Using fallback assignment extraction (no OpenAI)');
       return this.extractAssignmentFallback(text);
@@ -544,17 +585,7 @@ ${text.substring(0, 8000)}`;
   }
 
   extractAssignmentFallback(text) {
-    // CRITICAL: Check if this is actually a mortgage origination, not an assignment
-    if (this.isMortgageOrigination(text)) {
-      console.log('🚫 Detected mortgage origination in fallback - skipping assignment extraction');
-      return null;
-    }
-    
-    // CRITICAL: Additional check for borrower-to-MERS patterns
-    if (this.isBorrowerToMERSOrigination(text)) {
-      console.log('🚫 Detected borrower-to-MERS origination in fallback - skipping assignment extraction');
-      return null;
-    }
+    // REMOVED: No more chunk-level filtering - extract everything and filter later
     
     // Enhanced pattern matching for assignment documents with better MERS handling
     

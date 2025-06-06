@@ -30,6 +30,18 @@ router.post('/pdf', upload.any(), async (req, res) => {
       try {
         console.log(`🔄 Processing file: ${file.originalname}`);
         const fileResult = await processFile(file);
+        
+        // Log document types if found
+        if (fileResult.data && fileResult.data.length > 0) {
+          fileResult.data.forEach(loan => {
+            if (loan.document_types) {
+              console.log(`📄 Document types saved for loan: ${loan.document_types}`);
+            } else {
+              console.log(`⚠️ No document types found for loan`);
+            }
+          });
+        }
+        
         results.successful.push(fileResult);
         console.log(`✅ File processed successfully: ${file.originalname}`);
       } catch (error) {

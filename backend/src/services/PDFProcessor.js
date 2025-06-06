@@ -108,6 +108,7 @@ class PDFProcessor {
         
         // Identify document types in this chunk
         const docTypes = this.identifyDocumentTypes(chunk);
+        console.log(`📄 Chunk ${i + 1} document types found:`, docTypes);
         docTypes.forEach(type => documentTypesFound.add(type));
         
         // Use comprehensive extraction for each chunk
@@ -129,7 +130,9 @@ class PDFProcessor {
       if (allExtractedData.length > 0) {
         const mergedLoanData = this.mergeExtractedData(allExtractedData);
         // Add document types found
-        mergedLoanData._document_types = Array.from(documentTypesFound).join(', ');
+        const documentTypesString = Array.from(documentTypesFound).join(', ');
+        mergedLoanData._document_types = documentTypesString;
+        console.log('📄 Document types detected across all chunks:', documentTypesString);
         console.log('📋 Final merged loan data:', JSON.stringify(mergedLoanData, null, 2));
         results.data.push(mergedLoanData);
       }

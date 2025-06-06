@@ -131,7 +131,8 @@ class PDFProcessor {
         const mergedLoanData = this.mergeExtractedData(allExtractedData);
         // Add document types found
         const documentTypesString = Array.from(documentTypesFound).join(', ');
-        mergedLoanData._document_types = documentTypesString;
+        mergedLoanData.document_types = documentTypesString; // Store in the actual field
+        mergedLoanData._document_types = documentTypesString; // Also keep for metadata
         console.log('📄 Document types detected across all chunks:', documentTypesString);
         console.log('📋 Final merged loan data:', JSON.stringify(mergedLoanData, null, 2));
         results.data.push(mergedLoanData);
@@ -456,7 +457,6 @@ For any field not found, use null. Respond ONLY with valid JSON.`;
       investor_name: merged.investor_name || null,
       loan_type: merged.loan_type || null,
       property_type: merged.property_type || null,
-      document_types: merged._document_types || null,
       // Additional metadata
       _source: 'pdf',
       _extraction_method: 'comprehensive',

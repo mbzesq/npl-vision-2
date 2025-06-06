@@ -209,38 +209,63 @@ ${text.substring(0, 8000)}`;
   }
 
   detectPOA(text) {
-    // Enhanced POA patterns to capture various legal phrasings
+    // Enhanced POA patterns to capture clean agent/principal pairs
     const poaPatterns = [
+      // "executed by [Agent] as attorney-in-fact for [Principal]"
+      /executed\s+by\s+([^,]+?)\s*,?\s*(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF)\s+(?:for|on behalf of)\s+([^,\n.]+?)(?:,|\.|\s*$|\s+(?:dated|this|on))/i,
+      
       // "by [Agent] as attorney-in-fact for [Principal]"
-      /(?:by|executed by)\s+(?<agent>[\w\s,.\-']+?)\s*,?\s+(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF|agent)\s+(?:for|on behalf of)\s+(?<principal>[\w\s,.\-']+?)(?:,|\s*$|\s+(?:dated|executed|recorded))/i,
+      /(?:^|\s)by\s+([^,]+?)\s*,?\s*(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF)\s+(?:for|on behalf of)\s+([^,\n.]+?)(?:,|\.|\s*$|\s+(?:dated|this|on))/i,
       
-      // "[Principal] by [Agent] as attorney-in-fact"  
-      /(?<principal>[\w\s,.\-']+?)\s+by\s+(?<agent>[\w\s,.\-']+?)\s*,?\s*(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF|agent)(?:\s+for\s+[\w\s,.\-']+?)?(?:,|\s*$|\s+(?:dated|executed|recorded))/i,
-      
-      // "executed by [Agent] as AIF for [Principal]"
-      /executed\s+by\s+(?<agent>[\w\s,.\-']+?)\s*,?\s*(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF)\s+(?:for|on behalf of)\s+(?<principal>[\w\s,.\-']+?)(?:,|\s*$|\s+(?:dated|executed|recorded))/i,
+      // "[Principal] by [Agent] as attorney-in-fact"
+      /^([^,]+?)\s+by\s+([^,]+?)\s*,?\s*(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF)(?:\s|,|\.|$)/i,
       
       // "[Agent], as attorney-in-fact for [Principal]"
-      /(?<agent>[\w\s,.\-']+?)\s*,\s*(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF|agent)\s+(?:for|on behalf of)\s+(?<principal>[\w\s,.\-']+?)(?:,|\s*$|\s+(?:dated|executed|recorded))/i
+      /^([^,]+?)\s*,\s*(?:as\s+)?(?:attorney[- ]in[- ]fact|AIF)\s+(?:for|on behalf of)\s+([^,\n.]+?)(?:,|\.|\s*$|\s+(?:dated|this|on))/i
     ];
 
-    for (const pattern of poaPatterns) {
+    for (let i = 0; i < poaPatterns.length; i++) {
+      const pattern = poaPatterns[i];
       const match = text.match(pattern);
-      if (match?.groups?.agent && match?.groups?.principal) {
-        const agent = match.groups.agent.trim().replace(/,\s*$/, '');
-        const principal = match.groups.principal.trim().replace(/,\s*$/, '');
+      if (match && match[1] && match[2]) {
+        let agent, principal;
         
-        console.log(`🔍 POA detected: Agent="${agent}", Principal="${principal}"`);
+        // For pattern 3, the order is reversed (principal first, then agent)
+        if (i === 2) {
+          principal = this.cleanPOAName(match[1]);
+          agent = this.cleanPOAName(match[2]);
+        } else {
+          agent = this.cleanPOAName(match[1]);
+          principal = this.cleanPOAName(match[2]);
+        }
         
-        return {
-          poa_agent: agent,
-          poa_principal: principal,
-          isPOA: true
-        };
+        // Validate that we have reasonable names (not just punctuation or boilerplate)
+        if (agent.length > 2 && principal.length > 2 && !agent.match(/^[\s,.-]+$/) && !principal.match(/^[\s,.-]+$/)) {
+          console.log(`🔍 POA detected: Agent="${agent}", Principal="${principal}"`);
+          
+          return {
+            poa_agent: agent,
+            poa_principal: principal,
+            isPOA: true
+          };
+        }
       }
     }
     
     return null;
+  }
+
+  cleanPOAName(name) {
+    if (!name) return '';
+    
+    return name
+      .trim()
+      .replace(/^[,\s]+|[,\s]+$/g, '') // Remove leading/trailing commas and spaces
+      .replace(/\s+/g, ' ') // Normalize whitespace
+      .replace(/,\s*$/, '') // Remove trailing comma
+      .replace(/^(by|executed by|as)\s+/i, '') // Remove POA prefixes that leaked in
+      .replace(/\s+(as attorney|as aif|attorney).*$/i, '') // Remove POA suffixes that leaked in
+      .trim();
   }
 
   async extractAssignmentDetails(text) {
@@ -659,23 +684,37 @@ ${text.substring(0, 8000)}`;
   getNormalizedName(name) {
     if (!name) return '';
     
+    // First check if this is a MERS nominee - extract the true principal
+    const mersInfo = this.analyzeMERSRole(name);
+    if (mersInfo.isMERS && mersInfo.effectiveName) {
+      name = mersInfo.effectiveName; // Use the true underlying party
+    }
+    
     let normalized = name.toLowerCase()
+      // Remove address information
+      .replace(/,?\s*(?:at|located at)\s+.+$/i, '') // Remove everything after "at" or "located at"
+      .replace(/,\s*\d{1,5}\s+[^,]+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|way|blvd|boulevard).*$/i, '') // Remove street addresses
+      .replace(/,\s*\d{5}(?:-\d{4})?(?:\s*,.*)?$/i, '') // Remove ZIP codes and everything after
+      .replace(/,\s*(?:attn|attention)\s*[#:]?\s*\d+.*$/i, '') // Remove attention lines
+      .replace(/,\s*(?:[A-Z]{2}\s+\d{5}|[A-Z]{2})\s*$/i, '') // Remove state codes at end
+      
       // Remove common boilerplate legal suffixes
-      .replace(/,?\s*its successors and\/or assigns?.*$/i, '')
-      .replace(/,?\s*its successors and assigns?.*$/i, '')
-      .replace(/,?\s*and\/or assigns?.*$/i, '')
-      .replace(/,?\s*and assigns?.*$/i, '')
-      .replace(/,?\s*its successors.*$/i, '')
-      .replace(/,?\s*their successors.*$/i, '')
-      .replace(/,?\s*successors in interest.*$/i, '')
-      .replace(/,?\s*their legal representatives.*$/i, '')
-      .replace(/,?\s*by and through its attorney-in-fact.*$/i, '')
-      .replace(/,?\s*acting through.*$/i, '')
-      .replace(/,?\s*as attorney-in-fact for.*$/i, '')
-      .replace(/,?\s*doing business as.*$/i, '')
+      .replace(/,?\s*(?:its\s+)?successors\s+and\/or\s+assigns?.*$/i, '')
+      .replace(/,?\s*(?:its\s+)?successors\s+and\s+assigns?.*$/i, '')
+      .replace(/,?\s*and\/or\s+assigns?.*$/i, '')
+      .replace(/,?\s*and\s+assigns?.*$/i, '')
+      .replace(/,?\s*(?:its\s+)?successors.*$/i, '')
+      .replace(/,?\s*(?:their\s+)?successors.*$/i, '')
+      .replace(/,?\s*successors\s+in\s+interest.*$/i, '')
+      .replace(/,?\s*(?:their\s+)?legal\s+representatives.*$/i, '')
+      .replace(/,?\s*by\s+and\s+through\s+its\s+attorney-in-fact.*$/i, '')
+      .replace(/,?\s*acting\s+through.*$/i, '')
+      .replace(/,?\s*as\s+attorney-in-fact\s+for.*$/i, '')
+      .replace(/,?\s*doing\s+business\s+as.*$/i, '')
       .replace(/,?\s*d\/b\/a.*$/i, '')
-      .replace(/,?\s*solely as nominee.*$/i, '')
-      .replace(/,?\s*as trustee for.*$/i, '')
+      .replace(/,?\s*solely\s+as\s+nominee.*$/i, '')
+      .replace(/,?\s*as\s+trustee\s+for.*$/i, '')
+      .replace(/,?\s*as\s+nominee\s+for.*$/i, '') // Remove any remaining nominee language
       
       // Normalize corporate suffixes
       .replace(/\bn\.?a\.?/gi, 'na')
@@ -684,10 +723,12 @@ ${text.substring(0, 8000)}`;
       .replace(/\binc\.?/gi, 'incorporated')
       .replace(/\bltd\.?/gi, 'limited')
       .replace(/\bl\.?p\.?/gi, 'lp')
+      .replace(/\bco\.?$/gi, 'company')
       
       // Clean up whitespace and punctuation
       .replace(/\s+/g, ' ')
       .replace(/[.,;]+$/, '')
+      .replace(/^[,\s]+|[,\s]+$/g, '') // Remove leading/trailing commas and spaces
       .trim();
     
     return normalized;
@@ -749,27 +790,85 @@ ${text.substring(0, 8000)}`;
   advancedNameMatch(name1, name2) {
     if (!name1 || !name2) return false;
     
-    // Exact match
-    if (name1 === name2) return true;
+    const norm1 = this.getNormalizedName(name1);
+    const norm2 = this.getNormalizedName(name2);
     
-    // Fuzzy match with 90% similarity threshold
-    const similarity = this.calculateSimilarity(name1, name2);
-    if (similarity >= 0.9) return true;
+    // Exact match after normalization
+    if (norm1 === norm2) return true;
+    
+    // Fuzzy match with enhanced similarity (includes successor mapping)
+    const similarity = this.calculateSimilarity(norm1, norm2);
+    if (similarity >= 0.85) return true; // Lowered threshold due to better normalization
     
     // Containment match (for cases like "Bank of America" vs "Bank of America, N.A.")
-    if (name1.includes(name2) || name2.includes(name1)) return true;
+    if (norm1.includes(norm2) || norm2.includes(norm1)) {
+      // Make sure it's not just a short common word
+      const shorter = norm1.length < norm2.length ? norm1 : norm2;
+      if (shorter.length >= 5) return true; // Only if substantial overlap
+    }
     
     return false;
   }
 
+  // Known successor/acquisition mappings
+  getKnownSuccessors() {
+    return {
+      'countrywide home loans, incorporated': 'bank of america, na',
+      'countrywide home loans, inc': 'bank of america, na',
+      'countrywide bank, na': 'bank of america, na',
+      'countrywide bank, fsb': 'bank of america, na',
+      'bac home loans servicing, lp': 'bank of america, na',
+      'residential funding company, llc': 'ally bank',
+      'gmac mortgage, llc': 'ally bank',
+      'chase home finance llc': 'jpmorgan chase bank, na',
+      'washington mutual bank': 'jpmorgan chase bank, na',
+      'wamu': 'jpmorgan chase bank, na',
+      'wells fargo home mortgage': 'wells fargo bank, na',
+      'world savings bank, fsb': 'wells fargo bank, na',
+      'wachovia mortgage, fsb': 'wells fargo bank, na'
+    };
+  }
+
   calculateSimilarity(str1, str2) {
+    if (!str1 || !str2) return 0;
+    
+    // Check known successor mappings first
+    const successors = this.getKnownSuccessors();
+    const norm1 = str1.toLowerCase().trim();
+    const norm2 = str2.toLowerCase().trim();
+    
+    // Direct successor mapping
+    if (successors[norm1] === norm2 || successors[norm2] === norm1) {
+      return 1.0; // Perfect match via successor mapping
+    }
+    
+    // Check if one maps to the other
+    if (successors[norm1] && successors[norm1] === norm2) return 1.0;
+    if (successors[norm2] && successors[norm2] === norm1) return 1.0;
+    
     const longer = str1.length > str2.length ? str1 : str2;
     const shorter = str1.length > str2.length ? str2 : str1;
     
     if (longer.length === 0) return 1.0;
     
-    const editDistance = this.levenshteinDistance(longer, shorter);
-    return (longer.length - editDistance) / longer.length;
+    // Enhanced fuzzy matching
+    const editDistance = this.levenshteinDistance(longer.toLowerCase(), shorter.toLowerCase());
+    const similarity = (longer.length - editDistance) / longer.length;
+    
+    // Boost similarity for partial matches of known entities
+    if (similarity >= 0.7) {
+      // Check if both contain common banking terms
+      const bankTerms = ['bank', 'mortgage', 'financial', 'lending', 'loan', 'trust', 'national', 'home'];
+      const commonTerms = bankTerms.filter(term => 
+        norm1.includes(term) && norm2.includes(term)
+      ).length;
+      
+      if (commonTerms >= 2) {
+        return Math.min(1.0, similarity + 0.1); // Small boost for banking entities
+      }
+    }
+    
+    return similarity;
   }
 
   levenshteinDistance(str1, str2) {
@@ -800,34 +899,49 @@ ${text.substring(0, 8000)}`;
     return matrix[str2.length][str1.length];
   }
 
+  extractMERSPrincipal(name) {
+    if (!name) return null;
+    
+    // Enhanced MERS principal extraction patterns
+    const mersPatterns = [
+      // "MERS as nominee for [Company]"
+      /mers.*?(?:as\s+|solely\s+as\s+)?nominee\s+for\s+(.+?)(?:,\s*(?:its\s+successors|and\s+assigns|located|at\s+\d)|\s*$)/i,
+      // "MERS, solely as nominee for [Company]"
+      /mers,?\s*solely\s+as\s+nominee\s+for\s+(.+?)(?:,\s*(?:its\s+successors|and\s+assigns|located|at\s+\d)|\s*$)/i,
+      // "Mortgage Electronic Registration Systems, Inc. as nominee for [Company]"
+      /mortgage\s+electronic\s+registration\s+systems.*?as\s+nominee\s+for\s+(.+?)(?:,\s*(?:its\s+successors|and\s+assigns|located|at\s+\d)|\s*$)/i
+    ];
+    
+    for (const pattern of mersPatterns) {
+      const match = name.match(pattern);
+      if (match && match[1]) {
+        let principal = match[1].trim();
+        // Clean up the principal name
+        principal = principal.replace(/,?\s*its\s+successors.*$/i, '');
+        principal = principal.replace(/,?\s*and\s+assigns.*$/i, '');
+        return principal;
+      }
+    }
+    
+    return null;
+  }
+
   analyzeMERSRole(partyName) {
     if (!partyName) return { isMERS: false };
     
     const lowerName = partyName.toLowerCase();
+    const isMERSEntity = lowerName.includes('mers') || lowerName.includes('mortgage electronic registration');
     
-    // Look for MERS nominee patterns - more comprehensive matching
-    const mersPatterns = [
-      /mers.*as nominee for (.+?)(?:,|\s+and\s|$)/i,
-      /mers.*solely as nominee for (.+?)(?:,|\s+and\s|$)/i,
-      /mortgage electronic registration systems.*as nominee for (.+?)(?:,|\s+and\s|$)/i
-    ];
-    
-    let mersNomineeMatch = null;
-    for (const pattern of mersPatterns) {
-      mersNomineeMatch = partyName.match(pattern);
-      if (mersNomineeMatch) break;
-    }
-    
-    if (mersNomineeMatch || lowerName.includes('mers')) {
-      const effectiveName = mersNomineeMatch ? mersNomineeMatch[1].trim() : null;
+    if (isMERSEntity) {
+      const principal = this.extractMERSPrincipal(partyName);
       
       return {
         isMERS: true,
         originalName: partyName,
-        effectiveName: effectiveName,
+        effectiveName: principal, // The true underlying party
         role: 'nominee',
-        // CRITICAL: MERS should always be treated as passthrough to the true party
-        isPassthrough: true
+        isPassthrough: true,
+        principalFound: !!principal
       };
     }
     

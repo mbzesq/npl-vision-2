@@ -11,6 +11,17 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
     }).format(value)
   }
 
+  const stripAddressFromName = (name) => {
+    if (!name) return '-'
+    // Remove address information for cleaner display
+    return name
+      .replace(/,\s*(?:at|located at)\s+.+$/i, '')
+      .replace(/,\s*\d{1,5}\s+[^,]+(?:street|st|avenue|ave|road|rd|drive|dr|lane|ln|way|blvd|boulevard).*$/i, '')
+      .replace(/,\s*\d{5}(?:-\d{4})?(?:\s*,.*)?$/i, '')
+      .replace(/,\s*(?:attn|attention)\s*[#:]?\s*\d+.*$/i, '')
+      .trim()
+  }
+
   const formatPercentage = (value) => {
     if (!value) return '-'
     return `${(parseFloat(value) * 100).toFixed(3)}%`
@@ -216,18 +227,21 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                         <div className="flex-1">
                           <p className="text-sm font-medium text-gray-900">
                             Assignment {idx + 1}: 
-                            {/* Display assignor with POA context */}
+                            {/* Display assignor with clean POA context */}
                             {assignment.poa_agent && assignment.poa_principal ? (
-                              <span>
-                                {assignment.poa_principal} 
-                                <span className="text-blue-600 font-normal"> (executed by {assignment.poa_agent} as Attorney-in-Fact)</span>
-                              </span>
+                              <>
+                                <strong>{assignment.poa_principal}</strong>
+                                <br />
+                                <small className="text-blue-600 font-normal">
+                                  (executed by {assignment.poa_agent} as Attorney-in-Fact)
+                                </small>
+                              </>
                             ) : (
-                              <span>{assignment.assignor_normalized || assignment.assignor_name || assignment.assignor}</span>
+                              <span>{stripAddressFromName(assignment.assignor_normalized || assignment.assignor_name || assignment.assignor)}</span>
                             )}
                             <span className="mx-2">→</span>
-                            {/* Display assignee */}
-                            <span>{assignment.assignee_normalized || assignment.assignee_name || assignment.assignee}</span>
+                            {/* Display assignee with clean formatting */}
+                            <span>{stripAddressFromName(assignment.assignee_normalized || assignment.assignee_name || assignment.assignee)}</span>
                           </p>
                           <div className="text-xs text-gray-500 space-x-4">
                             {(assignment.execution_date || assignment.assignmentDate) && (
@@ -239,10 +253,21 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                             {(assignment.mers_flag || assignment.assignor_mers_info?.isMERS || assignment.assignee_mers_info?.isMERS) && (
                               <span className="text-green-600">MERS Passthrough</span>
                             )}
-                            {/* Enhanced POA indicator */}
+                            {/* Enhanced POA indicator with clean display */}
                             {(assignment.poa_agent || assignment.poa_info?.isPOA || assignment.power_of_attorney_indicator) && (
                               <span className="text-blue-600">
-                                POA: {assignment.poa_principal || assignment.poa_info?.principal || assignment.principal_name}
+                                POA Principal: {assignment.poa_principal || assignment.poa_info?.principal || assignment.principal_name}
+                              </span>
+                            )}
+                            {/* Show MERS passthrough status */}
+                            {assignment.assignor_mers_info?.effectiveName && (
+                              <span className="text-green-600">
+                                MERS → {assignment.assignor_mers_info.effectiveName}
+                              </span>
+                            )}
+                            {assignment.assignee_mers_info?.effectiveName && (
+                              <span className="text-green-600">
+                                MERS → {assignment.assignee_mers_info.effectiveName}
                               </span>
                             )}
                             {assignment.confidence_score && assignment.confidence_score < 0.8 && (
@@ -275,11 +300,25 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                   </div>
                 </div>
                 
-                {/* Chain Issues */}
+                {/* Chain Issues with improved messaging */}
                 {loan.chain_issues && (
                   <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
                     <p className="text-xs font-medium text-yellow-800 mb-1">Chain Issues:</p>
-                    <p className="text-xs text-yellow-700">{loan.chain_issues}</p>
+                    <div className="text-xs text-yellow-700">
+                      {loan.chain_issues.split(';').map((issue, idx) => {
+                        // Check if this is a POA-related issue that should be shown as resolved
+                        const isPOAResolved = issue.includes('POA') || 
+                                            (issue.includes('does not match') && 
+                                             loan.assignment_chain?.some(a => a.poa_agent || a.poa_principal));
+                        
+                        return (
+                          <div key={idx} className={isPOAResolved ? 'text-green-700' : 'text-yellow-700'}>
+                            {isPOAResolved && '✓ Resolved via POA: '}
+                            {issue.trim()}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
               </div>

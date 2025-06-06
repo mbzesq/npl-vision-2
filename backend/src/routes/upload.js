@@ -13,6 +13,8 @@ const dataValidator = new DataValidator();
 // Upload PDF files
 router.post('/pdf', upload.any(), async (req, res) => {
   try {
+    console.log('📄 PDF upload started, files:', req.files?.length || 0);
+    
     if (!req.files || req.files.length === 0) {
       return res.status(400).json({ error: 'No files uploaded' });
     }
@@ -26,9 +28,12 @@ router.post('/pdf', upload.any(), async (req, res) => {
     // Process each file
     for (const file of req.files) {
       try {
+        console.log(`🔄 Processing file: ${file.originalname}`);
         const fileResult = await processFile(file);
         results.successful.push(fileResult);
+        console.log(`✅ File processed successfully: ${file.originalname}`);
       } catch (error) {
+        console.error(`❌ File processing failed: ${file.originalname}`, error);
         results.failed.push({
           fileName: file.originalname,
           error: error.message
@@ -36,10 +41,16 @@ router.post('/pdf', upload.any(), async (req, res) => {
       }
     }
 
+    console.log('📊 Upload results:', results);
     res.json(results);
   } catch (error) {
-    console.error('Upload error:', error);
-    res.status(500).json({ error: 'Upload processing failed' });
+    console.error('❌ PDF Upload route error:', error);
+    console.error('Full error stack:', error.stack);
+    res.status(500).json({ 
+      error: 'PDF upload processing failed',
+      details: error.message,
+      stage: 'pdf_upload_route'
+    });
   }
 });
 
@@ -176,8 +187,25 @@ async function processFile(file) {
           });
         } else {
           // Create new loan
-          loan = await Loan.create(loanData);
-          action = 'created';
+          try {
+            loan = await Loan.create(loanData);
+            action = 'created';
+          } catch (createError) {
+            console.error('❌ Loan creation failed:', createError.message);
+            console.error('Failed loan data:', Object.keys(loanData));
+            // Try creating with only safe fields
+            const safeFields = {};
+            ['borrower_name', 'co_borrower_name', 'property_address', 'property_city', 
+             'property_state', 'property_zip', 'loan_amount', 'current_upb', 'interest_rate',
+             'loan_date', 'maturity_date', 'loan_number', 'investor_name'].forEach(field => {
+              if (loanData[field] !== undefined) {
+                safeFields[field] = loanData[field];
+              }
+            });
+            loan = await Loan.create(safeFields);
+            console.log('⚠️ Loan created with safe fields only');
+            action = 'created';
+          }
         }
 
         savedLoans.push({

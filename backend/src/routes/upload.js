@@ -134,7 +134,18 @@ async function processFile(file) {
       
       if (validation.isValid) {
         validatedData.push(loanData);
+        console.log('✅ Loan data validation passed:', {
+          borrower_name: loanData.borrower_name || 'MISSING',
+          property_address: loanData.property_address || 'MISSING',
+          loan_amount: loanData.loan_amount || 'MISSING'
+        });
       } else {
+        console.log('❌ Loan data validation failed:', validation.errors);
+        console.log('📊 Failed loan data:', {
+          borrower_name: loanData.borrower_name || 'MISSING',
+          property_address: loanData.property_address || 'MISSING',
+          keys: Object.keys(loanData)
+        });
         validationErrors.push({
           data: loanData,
           errors: validation.errors

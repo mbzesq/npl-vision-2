@@ -1,6 +1,6 @@
 'use client'
 
-export default function LoanDetailsTable({ loans }) {
+export default function LoanDetailsTable({ loans, onLoanDeleted }) {
   const formatCurrency = (value) => {
     if (!value) return '-'
     return new Intl.NumberFormat('en-US', {
@@ -21,6 +21,31 @@ export default function LoanDetailsTable({ loans }) {
     return new Date(value).toLocaleDateString()
   }
 
+  const handleDeleteLoan = async (loanId) => {
+    if (!confirm('Are you sure you want to delete this loan?')) {
+      return
+    }
+
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/loans/${loanId}`, {
+        method: 'DELETE'
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to delete loan')
+      }
+
+      // Call callback to refresh the loan list
+      if (onLoanDeleted) {
+        onLoanDeleted(loanId)
+      }
+
+    } catch (error) {
+      console.error('Delete error:', error)
+      alert('Failed to delete loan. Please try again.')
+    }
+  }
+
   return (
     <div className="space-y-6">
       {loans.map((loan, index) => (
@@ -29,10 +54,18 @@ export default function LoanDetailsTable({ loans }) {
             <h3 className="text-lg font-semibold text-gray-900">
               Loan #{loan.id} {loan.loan_number && `- ${loan.loan_number}`}
             </h3>
-            <span className="text-xs text-gray-500">
-              Added {formatDate(loan.created_at)}
-              {loan.updated_at !== loan.created_at && ` • Updated ${formatDate(loan.updated_at)}`}
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className="text-xs text-gray-500">
+                Added {formatDate(loan.created_at)}
+                {loan.updated_at !== loan.created_at && ` • Updated ${formatDate(loan.updated_at)}`}
+              </span>
+              <button
+                onClick={() => handleDeleteLoan(loan.id)}
+                className="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded"
+              >
+                Delete
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

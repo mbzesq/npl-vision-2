@@ -60,6 +60,18 @@ export default function Dashboard() {
       maximumFractionDigits: 0
     }).format(value)
   }
+
+  const handleLoanDeleted = (deletedLoanId) => {
+    // Remove the deleted loan from state
+    setAllLoans(prev => prev.filter(loan => loan.id !== deletedLoanId))
+    setRecentLoans(prev => prev.filter(loan => loan.id !== deletedLoanId))
+    
+    // Update stats
+    setStats(prev => ({
+      ...prev,
+      totalLoans: prev.totalLoans - 1
+    }))
+  }
   return (
     <div className="p-8">
       <div className="max-w-7xl mx-auto">
@@ -113,7 +125,7 @@ export default function Dashboard() {
           {loading ? (
             <p className="text-gray-500">Loading...</p>
           ) : showDetailedView ? (
-            <LoanDetailsTable loans={allLoans} />
+            <LoanDetailsTable loans={allLoans} onLoanDeleted={handleLoanDeleted} />
           ) : recentLoans.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">

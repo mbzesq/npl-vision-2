@@ -165,13 +165,22 @@ ${text.substring(0, 8000)}`;
     console.log('📄 Extracting assignment documents...');
     const assignments = [];
 
-    // Process first 4 chunks to capture all assignments
-    const chunksToProcess = chunks.slice(0, 4);
+    // Process more chunks to capture all assignments (increased from 4 to 6)
+    const chunksToProcess = chunks.slice(0, 6);
 
     for (let i = 0; i < chunksToProcess.length; i++) {
       const chunk = chunksToProcess[i];
-      if (this.containsAssignmentData(chunk.text)) {
-        console.log(`🔍 Found assignment data in chunk ${i + 1}`);
+      const chunkText = chunk.text.substring(0, 500); // Preview for logging
+      
+      console.log(`🔍 Analyzing chunk ${i + 1}/${chunksToProcess.length} (${chunk.text.length} chars)`);
+      console.log(`📄 Chunk ${i + 1} preview:`, chunkText);
+      
+      // Check if this chunk contains assignment data
+      const hasAssignmentData = this.containsAssignmentData(chunk.text);
+      console.log(`📋 Chunk ${i + 1} has assignment data:`, hasAssignmentData);
+      
+      if (hasAssignmentData) {
+        console.log(`🔍 Found assignment data in chunk ${i + 1}, extracting details...`);
         try {
           const assignment = await this.extractAssignmentDetails(chunk.text);
           console.log(`📋 Chunk ${i + 1} assignment result:`, JSON.stringify(assignment, null, 2));
@@ -179,20 +188,33 @@ ${text.substring(0, 8000)}`;
           if (assignment && (assignment.assignor_name || assignment.assignor || assignment.assignee_name || assignment.assignee)) {
             assignments.push({
               ...assignment,
-              chunkIndex: i + 1
+              chunkIndex: i + 1,
+              chunkPreview: chunkText
             });
-            console.log(`✅ Added assignment from chunk ${i + 1}`);
+            console.log(`✅ Added assignment from chunk ${i + 1}: ${assignment.assignor_name || assignment.assignor} → ${assignment.assignee_name || assignment.assignee}`);
           } else {
-            console.log(`❌ No valid assignment data found in chunk ${i + 1}`);
+            console.log(`❌ No valid assignment data found in chunk ${i + 1} - assignment object was:`, assignment);
           }
         } catch (error) {
           console.error(`⚠️ Error extracting assignment from chunk ${i + 1}:`, error.message);
           // Continue to next chunk
         }
+      } else {
+        // Check why this chunk was skipped
+        const lowerText = chunk.text.toLowerCase();
+        if (lowerText.includes('assignment')) {
+          console.log(`⚠️ Chunk ${i + 1} contains 'assignment' but was filtered out - checking why...`);
+          const isMortgageOrig = this.isMortgageOrigination(chunk.text);
+          console.log(`📋 Chunk ${i + 1} - isMortgageOrigination:`, isMortgageOrig);
+        }
       }
     }
 
-    console.log(`📋 Found ${assignments.length} assignments`);
+    console.log(`📋 Found ${assignments.length} total assignments`);
+    assignments.forEach((assignment, idx) => {
+      console.log(`📄 Assignment ${idx + 1}: ${assignment.assignor_name || assignment.assignor || 'Unknown'} → ${assignment.assignee_name || assignment.assignee || 'Unknown'} (chunk ${assignment.chunkIndex})`);
+    });
+    
     return assignments;
   }
 
@@ -206,25 +228,68 @@ ${text.substring(0, 8000)}`;
       return false;
     }
     
-    // Look for various assignment indicators
-    return (lowerText.includes('assignment') && lowerText.includes('mortgage')) ||
-           lowerText.includes('assignment of deed') ||
-           lowerText.includes('assign') && (lowerText.includes('transfer') || lowerText.includes('convey')) ||
-           lowerText.includes('assignor') ||
-           lowerText.includes('assignee') ||
-           (lowerText.includes('recorded') && lowerText.includes('instrument'));
+    // Enhanced assignment detection patterns
+    const assignmentIndicators = [
+      // Explicit assignment language
+      (lowerText.includes('assignment') && lowerText.includes('mortgage')),
+      lowerText.includes('assignment of deed'),
+      lowerText.includes('assignment of security deed'),
+      
+      // Assignor/assignee language
+      lowerText.includes('assignor'),
+      lowerText.includes('assignee'),
+      
+      // Transfer language with assignment context
+      (lowerText.includes('assign') && (lowerText.includes('transfer') || lowerText.includes('convey'))),
+      (lowerText.includes('hereby assign') || lowerText.includes('hereby transfer')),
+      
+      // Corporate assignment patterns
+      (lowerText.includes('bank') && lowerText.includes('assign')),
+      (lowerText.includes('mortgage') && lowerText.includes('transfer')),
+      
+      // Recording language that suggests assignment
+      (lowerText.includes('recorded') && lowerText.includes('instrument') && 
+       (lowerText.includes('assign') || lowerText.includes('transfer'))),
+       
+      // POA assignment patterns
+      (lowerText.includes('attorney-in-fact') && lowerText.includes('mortgage')),
+      (lowerText.includes('attorney in fact') && lowerText.includes('assign'))
+    ];
+    
+    const hasAssignmentIndicator = assignmentIndicators.some(indicator => indicator);
+    
+    if (hasAssignmentIndicator) {
+      console.log('✅ Contains assignment data - detected via indicators');
+    }
+    
+    return hasAssignmentIndicator;
   }
 
   isMortgageOrigination(text) {
     const lowerText = text.toLowerCase();
+    
+    // CRITICAL: Only exclude if this is clearly a mortgage origination, not an assignment
+    // Check for explicit assignment language first - if present, this is NOT origination
+    const hasAssignmentLanguage = lowerText.includes('assignment of mortgage') ||
+                                 lowerText.includes('assignment of deed') ||
+                                 lowerText.includes('assignor') ||
+                                 lowerText.includes('assignee') ||
+                                 (lowerText.includes('assign') && (lowerText.includes('transfer') || lowerText.includes('convey')));
+    
+    // If it has assignment language, it's definitely not a mortgage origination
+    if (hasAssignmentLanguage) {
+      return false;
+    }
     
     // Check for mortgage origination patterns
     const isMortgageDoc = (lowerText.includes('mortgage') && lowerText.includes('deed')) ||
                          lowerText.includes('deed of trust') ||
                          lowerText.includes('security deed');
     
-    // Check for borrower-to-MERS pattern (typical in originations)
-    const hasBorrowerMERSPattern = lowerText.includes('borrower') && lowerText.includes('mers');
+    // Check for borrower-to-MERS pattern (typical in originations) 
+    // BUT only if there are individual names (not corporate entities)
+    const hasBorrowerMERSPattern = lowerText.includes('borrower') && lowerText.includes('mers') &&
+                                  (lowerText.includes(' and ') && !lowerText.includes('bank') && !lowerText.includes('corp'));
     
     // Check for origination language
     const hasOriginationLanguage = lowerText.includes('grants and conveys') ||
@@ -232,8 +297,8 @@ ${text.substring(0, 8000)}`;
                                   lowerText.includes('mortgagee') ||
                                   lowerText.includes('to secure payment');
     
-    // If it's a mortgage document with borrower-to-MERS language, it's likely origination
-    return isMortgageDoc && (hasBorrowerMERSPattern || hasOriginationLanguage);
+    // Only exclude if it's clearly a mortgage document AND has borrower-to-MERS pattern AND origination language
+    return isMortgageDoc && hasBorrowerMERSPattern && hasOriginationLanguage;
   }
 
   detectPOA(text) {

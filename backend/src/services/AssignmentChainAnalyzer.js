@@ -748,9 +748,9 @@ ${text.substring(0, 8000)}`;
       const assignorOriginal = assignment.assignor_name || assignment.assignor;
       const assigneeOriginal = assignment.assignee_name || assignment.assignee;
       
-      // Analyze MERS roles for both assignor and assignee
-      const assignorMersInfo = this.analyzeMERSRole(assignorOriginal);
-      const assigneeMersInfo = this.analyzeMERSRole(assigneeOriginal);
+      // Analyze MERS roles for both assignor and assignee (with context)
+      const assignorMersInfo = this.analyzeMERSRole(assignorOriginal, assigneeOriginal);
+      const assigneeMersInfo = this.analyzeMERSRole(assigneeOriginal, assignorOriginal);
       const assignorPOAInfo = this.analyzePOARole(assignorOriginal, assignment.principal_name || assignment.poa_principal);
       const assigneePOAInfo = this.analyzePOARole(assigneeOriginal, assignment.principal_name || assignment.poa_principal);
       
@@ -1166,6 +1166,16 @@ ${text.substring(0, 8000)}`;
         // Clean up the principal name
         principal = principal.replace(/,?\s*its\s+successors.*$/i, '');
         principal = principal.replace(/,?\s*and\s+assigns.*$/i, '');
+        principal = principal.replace(/,?\s*'s\s+successors.*$/i, '');
+        
+        // CRITICAL: If MERS nominee says "Lender", we need to use context
+        if (principal.toLowerCase() === 'lender' || 
+            principal.toLowerCase().includes('lender and lender')) {
+          // This is a generic "Lender" reference - we need to use the other party in the assignment
+          console.log('🔍 MERS nominee refers to generic "Lender" - need context');
+          return null; 
+        }
+        
         return principal;
       }
     }
@@ -1173,14 +1183,20 @@ ${text.substring(0, 8000)}`;
     return null;
   }
 
-  analyzeMERSRole(partyName) {
+  analyzeMERSRole(partyName, contextPartyName = null) {
     if (!partyName) return { isMERS: false };
     
     const lowerName = partyName.toLowerCase();
     const isMERSEntity = lowerName.includes('mers') || lowerName.includes('mortgage electronic registration');
     
     if (isMERSEntity) {
-      const principal = this.extractMERSPrincipal(partyName);
+      let principal = this.extractMERSPrincipal(partyName);
+      
+      // CRITICAL: If MERS nominee says "Lender" and we have context, use the context
+      if (!principal && contextPartyName) {
+        console.log(`🔍 Using context party "${contextPartyName}" as MERS principal`);
+        principal = contextPartyName;
+      }
       
       return {
         isMERS: true,
@@ -1188,7 +1204,8 @@ ${text.substring(0, 8000)}`;
         effectiveName: principal, // The true underlying party
         role: 'nominee',
         isPassthrough: true,
-        principalFound: !!principal
+        principalFound: !!principal,
+        usedContext: !this.extractMERSPrincipal(partyName) && !!principal
       };
     }
     

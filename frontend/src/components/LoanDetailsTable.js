@@ -215,14 +215,17 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                         </div>
                         <div className="flex-1">
                           <p className="text-sm font-medium text-gray-900">
-                            Assignment {idx + 1}: {assignment.assignor} → {assignment.assignee}
+                            Assignment {idx + 1}: {assignment.assignor_name || assignment.assignor} → {assignment.assignee_name || assignment.assignee}
                           </p>
                           <div className="text-xs text-gray-500 space-x-4">
-                            {assignment.assignmentDate && (
-                              <span>Executed: {formatDate(assignment.assignmentDate)}</span>
+                            {(assignment.execution_date || assignment.assignmentDate) && (
+                              <span>Executed: {formatDate(assignment.execution_date || assignment.assignmentDate)}</span>
                             )}
-                            {assignment.recordingDate && (
-                              <span>Recorded: {formatDate(assignment.recordingDate)}</span>
+                            {(assignment.recording_date || assignment.recordingDate) && (
+                              <span>Recorded: {formatDate(assignment.recording_date || assignment.recordingDate)}</span>
+                            )}
+                            {assignment.power_of_attorney_indicator && assignment.principal_name && (
+                              <span className="text-blue-600">POA: {assignment.principal_name}</span>
                             )}
                           </div>
                         </div>

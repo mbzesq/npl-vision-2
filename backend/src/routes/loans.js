@@ -108,6 +108,42 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// Database diagnostic endpoint
+router.get('/debug', async (req, res) => {
+  try {
+    // Check if we can connect and what columns exist
+    const tableInfo = await Loan.sequelize.query(
+      "SELECT column_name, data_type FROM information_schema.columns WHERE table_name = 'loans' ORDER BY ordinal_position",
+      { type: Loan.sequelize.QueryTypes.SELECT }
+    );
+
+    const loanCount = await Loan.count();
+    
+    // Try to get one loan safely
+    let sampleLoan = null;
+    try {
+      sampleLoan = await Loan.findOne();
+    } catch (err) {
+      sampleLoan = { error: err.message };
+    }
+
+    res.json({
+      success: true,
+      loanCount,
+      tableColumns: tableInfo,
+      sampleLoan: sampleLoan ? Object.keys(sampleLoan.dataValues || sampleLoan) : null,
+      databaseConnected: true
+    });
+
+  } catch (error) {
+    res.json({
+      success: false,
+      error: error.message,
+      databaseConnected: false
+    });
+  }
+});
+
 // Clear all data (GET request for easier testing)
 router.get('/clear-all', async (req, res) => {
   try {

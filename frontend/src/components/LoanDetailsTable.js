@@ -27,6 +27,10 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
 
   const getEffectivePartyName = (assignment, role) => {
     if (role === 'assignor') {
+      // Use properly formatted display name if available, fallback to other methods
+      if (assignment.assignor_display) {
+        return assignment.assignor_display
+      }
       // Use POA principal or MERS effective name if available
       if (assignment.poa_principal) {
         return stripAddressFromName(assignment.poa_principal)
@@ -37,6 +41,9 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
       return stripAddressFromName(assignment.assignor_normalized || assignment.assignor_name || assignment.assignor)
     } else {
       // assignee
+      if (assignment.assignee_display) {
+        return assignment.assignee_display
+      }
       if (assignment.assignee_mers_info?.effectiveName) {
         return stripAddressFromName(assignment.assignee_mers_info.effectiveName)
       }
@@ -252,27 +259,27 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                             {/* Display assignor with clean POA context */}
                             {assignment.poa_agent && assignment.poa_principal ? (
                               <>
-                                <strong>{stripAddressFromName(assignment.poa_principal)}</strong>
+                                <strong>{assignment.assignor_display || stripAddressFromName(assignment.poa_principal)}</strong>
                                 <br />
                                 <small className="text-blue-600 font-normal">
                                   (executed by {stripAddressFromName(assignment.poa_agent)} as Attorney-in-Fact)
                                 </small>
                               </>
                             ) : (
-                              <span>{stripAddressFromName(assignment.assignor_normalized || assignment.assignor_name || assignment.assignor)}</span>
+                              <span>{assignment.assignor_display || stripAddressFromName(assignment.assignor_normalized || assignment.assignor_name || assignment.assignor)}</span>
                             )}
                             <span className="mx-2">→</span>
                             {/* Display assignee with clean formatting and MERS handling */}
                             {assignment.assignee_mers_info?.effectiveName ? (
                               <>
-                                <strong>{stripAddressFromName(assignment.assignee_mers_info.effectiveName)}</strong>
+                                <strong>{assignment.assignee_display || stripAddressFromName(assignment.assignee_mers_info.effectiveName)}</strong>
                                 <br />
                                 <small className="text-green-600 font-normal">
                                   (via MERS as nominee)
                                 </small>
                               </>
                             ) : (
-                              <span>{stripAddressFromName(assignment.assignee_normalized || assignment.assignee_name || assignment.assignee)}</span>
+                              <span>{assignment.assignee_display || stripAddressFromName(assignment.assignee_normalized || assignment.assignee_name || assignment.assignee)}</span>
                             )}
                           </p>
                           <div className="text-xs text-gray-500 space-x-4">

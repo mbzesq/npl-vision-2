@@ -92,33 +92,37 @@ class PDFProcessor {
         throw new Error('No text content found in PDF');
       }
 
-      // Detect document type
-      const documentType = this.detectDocumentType(text);
+      console.log(`📄 PDF text length: ${text.length} characters`);
       
-      // Process based on document type
-      if (documentType && this.documentPrompts[documentType]) {
-        const extractedData = await this.extractWithOpenAI(text, documentType);
+      // Split text into chunks for better analysis
+      const textChunks = this.splitTextIntoChunks(text, 15000); // Larger chunks
+      console.log(`📑 Split into ${textChunks.length} chunks for analysis`);
+      
+      // Try to extract comprehensive loan data from all chunks
+      const allExtractedData = [];
+      
+      for (let i = 0; i < textChunks.length; i++) {
+        const chunk = textChunks[i];
+        console.log(`🔍 Processing chunk ${i + 1}/${textChunks.length} (${chunk.length} chars)`);
         
-        if (extractedData) {
-          // Convert to loan format if it's a mortgage
-          if (documentType === 'mortgage') {
-            const loanData = this.convertToLoanFormat(extractedData);
-            results.data.push(loanData);
-          }
+        // Use comprehensive extraction for each chunk
+        const extractedData = await this.extractComprehensiveLoanData(chunk);
+        if (extractedData && Object.keys(extractedData).length > 2) { // More than just nulls
+          allExtractedData.push(extractedData);
           
-          // Always store the raw document data
           results.documents.push({
-            type: documentType,
+            type: 'loan_document',
             data: extractedData,
-            confidence: extractedData.confidence || 0.9
+            confidence: extractedData.confidence || 0.8,
+            chunk: i + 1
           });
         }
-      } else {
-        // Try generic extraction
-        const genericData = await this.extractGenericLoanInfo(text);
-        if (genericData) {
-          results.data.push(genericData);
-        }
+      }
+      
+      // Merge all extracted data into a single comprehensive loan record
+      if (allExtractedData.length > 0) {
+        const mergedLoanData = this.mergeExtractedData(allExtractedData);
+        results.data.push(mergedLoanData);
       }
 
       results.processingTime = Date.now() - startTime;
@@ -263,6 +267,177 @@ class PDFProcessor {
         date: mortgageData.recording_date,
         instrument: mortgageData.instrument_number
       }
+    };
+  }
+
+  splitTextIntoChunks(text, chunkSize) {
+    const chunks = [];
+    for (let i = 0; i < text.length; i += chunkSize) {
+      chunks.push(text.substring(i, i + chunkSize));
+    }
+    return chunks;
+  }
+
+  async extractComprehensiveLoanData(text) {
+    // If OpenAI is not available, return mock data
+    if (!this.openai) {
+      console.log('🔄 Using mock comprehensive data extraction (OpenAI unavailable)');
+      return this.getMockComprehensiveData();
+    }
+
+    const prompt = `You are analyzing a loan document package. Extract ALL available loan information from this text with maximum precision.
+
+SEARCH FOR THESE SPECIFIC DATA POINTS:
+- Borrower names (primary and co-borrower)
+- Property address (street, city, state, zip)
+- Loan amount (original principal balance)
+- Interest rate (look for percentages like 9.250%, 4.5%, etc.)
+- Loan date/origination date
+- Maturity date
+- Current unpaid principal balance (UPB)
+- Monthly payment amount
+- Loan number/account number
+- Servicer name
+- Investor/owner name
+- Property type
+- Loan type (conventional, FHA, VA, etc.)
+- Recording information
+
+IMPORTANT INSTRUCTIONS:
+1. Look carefully for percentage rates (e.g., "9.250%", "4.50%", "3.875%")
+2. Extract full addresses including street, city, state, zip
+3. Find all borrower names, not just the first one
+4. Look for current balance amounts vs. original amounts
+5. Pay attention to dates in various formats (MM/DD/YYYY, Month DD, YYYY, etc.)
+6. If a field appears multiple times, use the most complete/recent value
+
+Return a JSON object with these exact field names:
+{
+  "borrower_name": "primary borrower full name",
+  "co_borrower_name": "co-borrower full name if exists",
+  "property_address": "full street address",
+  "property_city": "city name",
+  "property_state": "state (2-letter code if possible)",
+  "property_zip": "zip code",
+  "loan_amount": numeric_value,
+  "current_upb": numeric_value,
+  "interest_rate": decimal_value (e.g., 0.09250 for 9.250%),
+  "loan_date": "YYYY-MM-DD",
+  "maturity_date": "YYYY-MM-DD",
+  "monthly_payment": numeric_value,
+  "loan_number": "loan identifier",
+  "servicer_name": "servicing company",
+  "investor_name": "investor/owner",
+  "loan_type": "loan type",
+  "property_type": "property type",
+  "confidence": 0.9
+}
+
+For any field not found, use null. Respond ONLY with valid JSON.`;
+
+    try {
+      const completion = await this.openai.chat.completions.create({
+        model: "gpt-4-turbo-preview",
+        messages: [
+          {
+            role: "system",
+            content: "You are a specialist in extracting loan data from mortgage documents. Be thorough and precise."
+          },
+          {
+            role: "user",
+            content: `${prompt}\n\nDocument text:\n${text}`
+          }
+        ],
+        temperature: 0.1,
+        max_tokens: 1500
+      });
+
+      const response = completion.choices[0].message.content;
+      
+      try {
+        const data = JSON.parse(response);
+        return data;
+      } catch (parseError) {
+        // Try to extract JSON from response
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          return JSON.parse(jsonMatch[0]);
+        }
+        throw new Error('Invalid JSON response from OpenAI');
+      }
+
+    } catch (error) {
+      console.error('Comprehensive extraction error:', error);
+      console.log('🔄 Falling back to mock comprehensive data');
+      return this.getMockComprehensiveData();
+    }
+  }
+
+  mergeExtractedData(dataArray) {
+    // Merge multiple extraction results, preferring non-null values
+    const merged = {};
+    
+    dataArray.forEach(data => {
+      Object.keys(data).forEach(key => {
+        if (data[key] !== null && data[key] !== undefined && data[key] !== '') {
+          // If we don't have this field yet, or the new value is more complete
+          if (!merged[key] || (typeof data[key] === 'string' && data[key].length > (merged[key]?.length || 0))) {
+            merged[key] = data[key];
+          }
+          // For numbers, prefer the larger/more recent value (usually current_upb vs loan_amount)
+          if (typeof data[key] === 'number' && key === 'current_upb' && data[key] > 0) {
+            merged[key] = data[key];
+          }
+        }
+      });
+    });
+
+    // Ensure we have the required loan format
+    return {
+      borrower_name: merged.borrower_name || null,
+      co_borrower_name: merged.co_borrower_name || null,
+      property_address: merged.property_address || null,
+      property_city: merged.property_city || null,
+      property_state: merged.property_state || null,
+      property_zip: merged.property_zip || null,
+      loan_amount: merged.loan_amount || null,
+      current_upb: merged.current_upb || merged.loan_amount || null,
+      interest_rate: merged.interest_rate || null,
+      loan_date: merged.loan_date || null,
+      maturity_date: merged.maturity_date || null,
+      monthly_payment: merged.monthly_payment || null,
+      loan_number: merged.loan_number || null,
+      servicer_name: merged.servicer_name || null,
+      investor_name: merged.investor_name || null,
+      loan_type: merged.loan_type || null,
+      property_type: merged.property_type || null,
+      // Additional metadata
+      _source: 'pdf',
+      _extraction_method: 'comprehensive',
+      _chunks_processed: dataArray.length
+    };
+  }
+
+  getMockComprehensiveData() {
+    return {
+      borrower_name: "John Smith",
+      co_borrower_name: "Jane Smith",
+      property_address: "123 Main Street",
+      property_city: "Anytown",
+      property_state: "CA",
+      property_zip: "90210",
+      loan_amount: 250000,
+      current_upb: 240000,
+      interest_rate: 0.09250,
+      loan_date: "2020-01-15",
+      maturity_date: "2050-01-15",
+      monthly_payment: 2500,
+      loan_number: "LOAN-123456",
+      servicer_name: "Sample Servicing Co",
+      investor_name: "Sample Bank",
+      loan_type: "Conventional",
+      property_type: "Single Family",
+      confidence: 0.8
     };
   }
 

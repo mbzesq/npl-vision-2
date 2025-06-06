@@ -165,8 +165,8 @@ ${text.substring(0, 8000)}`;
     console.log('📄 Extracting assignment documents...');
     const assignments = [];
 
-    // Process more chunks to capture all assignments (increased from 4 to 6)
-    const chunksToProcess = chunks.slice(0, 6);
+    // Process more chunks to capture all assignments (increased to 10 to reach page 9+)
+    const chunksToProcess = chunks.slice(0, 10);
 
     for (let i = 0; i < chunksToProcess.length; i++) {
       const chunk = chunksToProcess[i];
@@ -940,8 +940,10 @@ ${text.substring(0, 8000)}`;
           const cleanCurrentAssignee = this.getNormalizedName(currentAssigneeForMatching);
           const cleanNextAssignor = this.getNormalizedName(nextAssignorForMatching);
           
-          const matchConfidence = this.calculateSimilarity(cleanCurrentAssignee, cleanNextAssignor);
-          const currentMatches = matchConfidence >= 0.85; // Lowered threshold due to better normalization
+          // CRITICAL FIX: Use strict validation that requires explicit assignment documents
+          // Don't use successor mappings to paper over missing assignments
+          const matchConfidence = this.calculateDocumentSimilarity(cleanCurrentAssignee, cleanNextAssignor);
+          const currentMatches = matchConfidence >= 0.85;
           
           if (!currentMatches) {
             // Check if this is a POA situation that should be considered a match
@@ -953,7 +955,7 @@ ${text.substring(0, 8000)}`;
               const mersMatch = this.checkMERSPassthrough(assignment, nextAssignment);
               if (!mersMatch) {
                 // Only report chain break if it's not just address contamination
-                const addressFreeMatch = this.calculateSimilarity(
+                const addressFreeMatch = this.calculateDocumentSimilarity(
                   cleanCurrentAssignee.replace(/,.*$/, '').trim(),
                   cleanNextAssignor.replace(/,.*$/, '').trim()
                 );
@@ -1181,6 +1183,42 @@ ${text.substring(0, 8000)}`;
       }
     }
     
+    return similarity;
+  }
+
+  calculateDocumentSimilarity(str1, str2) {
+    // STRICT similarity calculation for document-to-document validation
+    // Does NOT use successor mappings - requires explicit assignment documents
+    if (!str1 || !str2) return 0;
+    
+    const norm1 = str1.toLowerCase().trim();
+    const norm2 = str2.toLowerCase().trim();
+    
+    // Exact match after normalization
+    if (norm1 === norm2) return 1.0;
+    
+    const longer = str1.length > str2.length ? str1 : str2;
+    const shorter = str1.length > str2.length ? str2 : str1;
+    
+    if (longer.length === 0) return 1.0;
+    
+    // Pure fuzzy matching without successor mapping boosts
+    const editDistance = this.levenshteinDistance(longer.toLowerCase(), shorter.toLowerCase());
+    const similarity = (longer.length - editDistance) / longer.length;
+    
+    // Only very minor boost for obvious entity variations (like "Bank of America" vs "Bank of America, N.A.")
+    if (similarity >= 0.8) {
+      // Check for corporate suffix variations
+      const corporateSuffixes = ['na', 'incorporated', 'corp', 'llc', 'inc', 'limited', 'lp', 'company'];
+      const base1 = norm1.replace(new RegExp(`\\b(${corporateSuffixes.join('|')})\\b`, 'g'), '').trim();
+      const base2 = norm2.replace(new RegExp(`\\b(${corporateSuffixes.join('|')})\\b`, 'g'), '').trim();
+      
+      if (base1 === base2) {
+        return 0.95; // High similarity for suffix variations only
+      }
+    }
+    
+    console.log(`🔍 Document similarity: "${norm1}" vs "${norm2}" = ${Math.round(similarity * 100)}%`);
     return similarity;
   }
 

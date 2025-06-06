@@ -10,7 +10,40 @@ const excelProcessor = new ExcelProcessor();
 const pdfProcessor = new PDFProcessor();
 const dataValidator = new DataValidator();
 
-// Upload multiple files
+// Upload PDF files
+router.post('/pdf', upload.array('files', 10), async (req, res) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No files uploaded' });
+    }
+
+    const results = {
+      successful: [],
+      failed: [],
+      totalFiles: req.files.length
+    };
+
+    // Process each file
+    for (const file of req.files) {
+      try {
+        const fileResult = await processFile(file);
+        results.successful.push(fileResult);
+      } catch (error) {
+        results.failed.push({
+          fileName: file.originalname,
+          error: error.message
+        });
+      }
+    }
+
+    res.json(results);
+  } catch (error) {
+    console.error('Upload error:', error);
+    res.status(500).json({ error: 'Upload processing failed' });
+  }
+});
+
+// Upload multiple files (general endpoint)
 router.post('/', upload.array('files', 10), async (req, res) => {
   try {
     if (!req.files || req.files.length === 0) {

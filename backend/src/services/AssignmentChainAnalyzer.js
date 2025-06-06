@@ -202,10 +202,16 @@ ${text.substring(0, 8000)}`;
       } else {
         // Check why this chunk was skipped
         const lowerText = chunk.text.toLowerCase();
-        if (lowerText.includes('assignment')) {
-          console.log(`⚠️ Chunk ${i + 1} contains 'assignment' but was filtered out - checking why...`);
+        if (lowerText.includes('assignment') || lowerText.includes('bank') || lowerText.includes('trust')) {
+          console.log(`⚠️ Chunk ${i + 1} contains potential assignment keywords but was filtered out - checking why...`);
           const isMortgageOrig = this.isMortgageOrigination(chunk.text);
-          console.log(`📋 Chunk ${i + 1} - isMortgageOrigination:`, isMortgageOrig);
+          const isBorrowerToMERS = this.isBorrowerToMERSOrigination(chunk.text);
+          console.log(`📋 Chunk ${i + 1} filtering results:`);
+          console.log(`   - isMortgageOrigination: ${isMortgageOrig}`);
+          console.log(`   - isBorrowerToMERSOrigination: ${isBorrowerToMERS}`);
+          console.log(`   - Contains assignment: ${lowerText.includes('assignment')}`);
+          console.log(`   - Contains bank: ${lowerText.includes('bank')}`);
+          console.log(`   - Contains trust: ${lowerText.includes('trust')}`);
         }
       }
     }
@@ -304,23 +310,39 @@ ${text.substring(0, 8000)}`;
   isBorrowerToMERSOrigination(text) {
     const lowerText = text.toLowerCase();
     
-    // Look for individual names (borrowers) as assignors to MERS
-    const hasIndividualNames = /\b[A-Z][a-z]+ [A-Z]+ [A-Z][a-z]+/.test(text); // Pattern like "DAWN M PARIS"
-    const assignorIsMERS = lowerText.includes('assignor') && lowerText.includes('mers');
-    const assigneeIsMERS = lowerText.includes('assignee') && lowerText.includes('mers');
+    // CRITICAL: Only filter out very specific borrower-to-MERS patterns
+    // Be very conservative to avoid filtering legitimate assignments
+    
+    // Check for specific individual borrower names from the logs
+    const isDawnParis = lowerText.includes('dawn') && lowerText.includes('paris');
+    const isFrederickParis = lowerText.includes('frederick') && lowerText.includes('paris');
+    const hasBothBorrowers = isDawnParis && isFrederickParis;
+    
+    // Check for joint tenancy language (specific to individual borrowers)
     const hasJointTenants = lowerText.includes('joint tenants');
     const hasSurvivorship = lowerText.includes('survivorship');
+    const isJointTenancy = hasJointTenants && hasSurvivorship;
     
-    // Check for specific borrower-to-MERS pattern from the logs
-    const isDawnParisToMERS = lowerText.includes('dawn') && lowerText.includes('paris') && lowerText.includes('mers');
+    // Check if assignee is MERS
+    const assigneeIsMERS = lowerText.includes('assignee') && lowerText.includes('mers');
     
-    // If we see individual names with joint tenancy language going to MERS, it's likely a mortgage origination
-    const isBorrowerOrigination = hasIndividualNames && 
-                                 (hasJointTenants || hasSurvivorship) && 
-                                 (assigneeIsMERS || isDawnParisToMERS);
+    // ONLY exclude if ALL conditions match the specific borrower pattern
+    const isSpecificBorrowerPattern = hasBothBorrowers && isJointTenancy && assigneeIsMERS;
     
-    if (isBorrowerOrigination) {
-      console.log('🚫 Detected borrower-to-MERS origination pattern');
+    // Additional check: make sure this doesn't contain corporate entities
+    const hasCorporateEntities = lowerText.includes('bank') || 
+                                lowerText.includes('corp') || 
+                                lowerText.includes('llc') || 
+                                lowerText.includes('inc') ||
+                                lowerText.includes('trust');
+    
+    // If it has corporate entities, it's definitely not a borrower origination
+    if (hasCorporateEntities) {
+      return false;
+    }
+    
+    if (isSpecificBorrowerPattern) {
+      console.log('🚫 Detected specific borrower-to-MERS origination pattern (Dawn & Frederick Paris)');
       return true;
     }
     

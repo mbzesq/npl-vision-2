@@ -6,8 +6,7 @@ import LoanDetailsTable from '../components/LoanDetailsTable'
 export default function Dashboard() {
   const [stats, setStats] = useState({
     totalLoans: 0,
-    totalBalance: 0,
-    totalDocuments: 0
+    totalBalance: 0
   })
   const [recentLoans, setRecentLoans] = useState([])
   const [allLoans, setAllLoans] = useState([])
@@ -26,19 +25,13 @@ export default function Dashboard() {
       const loansResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/loans`)
       const loansData = await loansResponse.json()
       
-      // Load extraction logs for documents count
-      const logsResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/extraction-logs`)
-      const logsData = await logsResponse.json()
-      
       // Calculate statistics
       const totalLoans = loansData.loans?.length || 0
       const totalBalance = loansData.loans?.reduce((sum, loan) => sum + (parseFloat(loan.current_upb) || parseFloat(loan.loan_amount) || 0), 0) || 0
-      const totalDocuments = logsData.logs?.length || 0
       
       setStats({
         totalLoans,
-        totalBalance,
-        totalDocuments
+        totalBalance
       })
       
       // Set recent loans (first 5) and all loans
@@ -62,6 +55,10 @@ export default function Dashboard() {
   }
 
   const handleLoanDeleted = (deletedLoanId) => {
+    // Find the loan being deleted to subtract its balance
+    const deletedLoan = allLoans.find(loan => loan.id === deletedLoanId)
+    const deletedBalance = deletedLoan ? (parseFloat(deletedLoan.current_upb) || parseFloat(deletedLoan.loan_amount) || 0) : 0
+    
     // Remove the deleted loan from state
     setAllLoans(prev => prev.filter(loan => loan.id !== deletedLoanId))
     setRecentLoans(prev => prev.filter(loan => loan.id !== deletedLoanId))
@@ -69,7 +66,8 @@ export default function Dashboard() {
     // Update stats
     setStats(prev => ({
       ...prev,
-      totalLoans: prev.totalLoans - 1
+      totalLoans: prev.totalLoans - 1,
+      totalBalance: prev.totalBalance - deletedBalance
     }))
   }
   return (
@@ -82,7 +80,7 @@ export default function Dashboard() {
           </p>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div className="bg-white p-6 rounded-lg shadow">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">Total Loans</h3>
             <p className="text-3xl font-bold text-blue-600">
@@ -97,14 +95,6 @@ export default function Dashboard() {
               {loading ? '...' : formatCurrency(stats.totalBalance)}
             </p>
             <p className="text-sm text-gray-500 mt-1">Outstanding balance</p>
-          </div>
-          
-          <div className="bg-white p-6 rounded-lg shadow">
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">Documents</h3>
-            <p className="text-3xl font-bold text-blue-600">
-              {loading ? '...' : stats.totalDocuments.toLocaleString()}
-            </p>
-            <p className="text-sm text-gray-500 mt-1">Processed documents</p>
           </div>
         </div>
         

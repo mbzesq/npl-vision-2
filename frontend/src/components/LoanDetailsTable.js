@@ -194,14 +194,52 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
             </div>
           </div>
 
-          {/* Extraction Metadata */}
-          {(loan._source || loan._extraction_method || loan._chunks_processed) && (
-            <div className="mt-4 pt-4 border-t border-gray-200">
-              <p className="text-xs text-gray-500">
-                Source: {loan._source} • Method: {loan._extraction_method} • Chunks: {loan._chunks_processed}
-              </p>
+          {/* Document Processing Info */}
+          <div className="mt-4 pt-4 border-t border-gray-200">
+            <h4 className="text-sm font-medium text-gray-700 uppercase mb-2">Document Processing</h4>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+              <div>
+                <span className="text-gray-600">Data Source:</span>
+                <span className="ml-2 text-gray-900 capitalize">
+                  {loan._source === 'pdf' ? 'PDF Document Package' : loan._source || 'Unknown'}
+                </span>
+              </div>
+              <div>
+                <span className="text-gray-600">Extraction Method:</span>
+                <span className="ml-2 text-gray-900 capitalize">
+                  {loan._extraction_method === 'comprehensive' ? 'AI-Powered Analysis' : loan._extraction_method || 'Standard'}
+                </span>
+              </div>
+              {loan._chunks_processed && (
+                <div>
+                  <span className="text-gray-600">Document Sections:</span>
+                  <span className="ml-2 text-gray-900">
+                    {loan._chunks_processed} sections analyzed
+                  </span>
+                </div>
+              )}
+              <div>
+                <span className="text-gray-600">Last Updated:</span>
+                <span className="ml-2 text-gray-900">
+                  {formatDate(loan.updated_at)}
+                </span>
+              </div>
             </div>
-          )}
+            
+            {/* Document Types Found (if available) */}
+            {loan._document_types && (
+              <div className="mt-2">
+                <span className="text-gray-600 text-xs">Document Types Identified:</span>
+                <div className="flex flex-wrap gap-1 mt-1">
+                  {loan._document_types.split(',').map((type, idx) => (
+                    <span key={idx} className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                      {type.trim()}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       ))}
     </div>

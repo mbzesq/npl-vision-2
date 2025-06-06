@@ -70,15 +70,32 @@ export default function DataPreview({ data }) {
                 </div>
               </div>
 
-              {result.loansCreated !== undefined && (
+              {(result.loansCreated !== undefined || result.loansUpdated !== undefined) && (
                 <div className="mb-4">
-                  <p className="text-sm text-gray-600">
-                    <strong>{result.loansCreated}</strong> loans automatically saved to database
-                  </p>
+                  {result.loansCreated > 0 && (
+                    <p className="text-sm text-gray-600">
+                      ✅ <strong>{result.loansCreated}</strong> new loans created
+                    </p>
+                  )}
+                  {result.loansUpdated > 0 && (
+                    <p className="text-sm text-blue-600">
+                      🔄 <strong>{result.loansUpdated}</strong> existing loans updated with better data
+                    </p>
+                  )}
                   {result.saveErrors > 0 && (
                     <p className="text-sm text-red-600">
-                      <strong>{result.saveErrors}</strong> loans failed to save
+                      ❌ <strong>{result.saveErrors}</strong> loans failed to save
                     </p>
+                  )}
+                  {result.duplicateActions && result.duplicateActions.length > 0 && (
+                    <div className="mt-2 p-2 bg-blue-50 rounded">
+                      <p className="text-xs text-blue-700 font-medium">Duplicate Prevention Active:</p>
+                      {result.duplicateActions.map((action, idx) => (
+                        <p key={idx} className="text-xs text-blue-600">
+                          • Updated loan #{action.loanId} ({action.matchType.replace('_', ' ')})
+                        </p>
+                      ))}
+                    </div>
                   )}
                 </div>
               )}

@@ -186,6 +186,82 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
             </div>
           </div>
 
+          {/* Assignment Chain Section */}
+          {(loan.original_lender || loan.assignment_chain) && (
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <h4 className="text-sm font-medium text-gray-700 uppercase mb-3">Assignment Chain</h4>
+              
+              <div className="space-y-3">
+                {/* Original Lender */}
+                {loan.original_lender && (
+                  <div className="flex items-center space-x-3">
+                    <div className="w-3 h-3 bg-green-500 rounded-full flex-shrink-0"></div>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-gray-900">Original Lender</p>
+                      <p className="text-sm text-gray-600">{loan.original_lender}</p>
+                    </div>
+                  </div>
+                )}
+                
+                {/* Assignment Chain */}
+                {loan.assignment_chain && Array.isArray(loan.assignment_chain) && loan.assignment_chain.length > 0 && (
+                  <>
+                    {loan.assignment_chain.map((assignment, idx) => (
+                      <div key={idx} className="flex items-center space-x-3">
+                        <div className="flex flex-col items-center">
+                          <div className="w-0.5 h-4 bg-gray-300"></div>
+                          <div className="w-3 h-3 bg-blue-500 rounded-full flex-shrink-0"></div>
+                          {idx < loan.assignment_chain.length - 1 && <div className="w-0.5 h-4 bg-gray-300"></div>}
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-gray-900">
+                            Assignment {idx + 1}: {assignment.assignor} → {assignment.assignee}
+                          </p>
+                          <div className="text-xs text-gray-500 space-x-4">
+                            {assignment.assignmentDate && (
+                              <span>Executed: {formatDate(assignment.assignmentDate)}</span>
+                            )}
+                            {assignment.recordingDate && (
+                              <span>Recorded: {formatDate(assignment.recordingDate)}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </>
+                )}
+                
+                {/* Chain Status */}
+                <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-sm text-gray-600">Chain Status:</span>
+                    {loan.chain_complete === true ? (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                        ✓ Complete
+                      </span>
+                    ) : loan.chain_complete === false ? (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                        ⚠ Incomplete
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                        ? Unknown
+                      </span>
+                    )}
+                  </div>
+                </div>
+                
+                {/* Chain Issues */}
+                {loan.chain_issues && (
+                  <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded">
+                    <p className="text-xs font-medium text-yellow-800 mb-1">Chain Issues:</p>
+                    <p className="text-xs text-yellow-700">{loan.chain_issues}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Document Processing Info */}
           <div className="mt-4 pt-4 border-t border-gray-200">
             <div className="flex justify-between items-start">

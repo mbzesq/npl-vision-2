@@ -453,6 +453,7 @@ For any field not found, use null. Respond ONLY with valid JSON.`;
       investor_name: merged.investor_name || null,
       loan_type: merged.loan_type || null,
       property_type: merged.property_type || null,
+      document_types: merged._document_types || null,
       // Additional metadata
       _source: 'pdf',
       _extraction_method: 'comprehensive',

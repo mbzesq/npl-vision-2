@@ -108,6 +108,14 @@ const Loan = sequelize.define('Loan', {
     type: DataTypes.STRING(50),
     allowNull: true
   },
+  next_due_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true
+  },
+  document_types: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
   // Future-proofing columns
   servicing_data: {
     type: DataTypes.JSONB,

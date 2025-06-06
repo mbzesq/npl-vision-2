@@ -132,10 +132,6 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                   <span className="text-gray-600">Maturity:</span>
                   <span className="ml-2 text-gray-900">{formatDate(loan.maturity_date)}</span>
                 </p>
-                <p className="text-sm">
-                  <span className="text-gray-600">Last Paid:</span>
-                  <span className="ml-2 text-gray-900">{formatDate(loan.last_paid_date)}</span>
-                </p>
               </div>
             </div>
 
@@ -158,6 +154,14 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                 <p className="text-sm">
                   <span className="text-gray-600">Lien Position:</span>
                   <span className="ml-2 text-gray-900">{loan.lien_position || '-'}</span>
+                </p>
+                <p className="text-sm">
+                  <span className="text-gray-600">Last Paid:</span>
+                  <span className="ml-2 text-gray-900">{formatDate(loan.last_paid_date)}</span>
+                </p>
+                <p className="text-sm">
+                  <span className="text-gray-600">Next Due:</span>
+                  <span className="ml-2 text-gray-900">{formatDate(loan.next_due_date)}</span>
                 </p>
               </div>
             </div>
@@ -188,9 +192,9 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
               <div className="flex-1">
                 <h4 className="text-sm font-medium text-gray-700 uppercase mb-2">Documents Reviewed</h4>
                 
-                {loan._document_types ? (
+                {loan.document_types ? (
                   <div className="flex flex-wrap gap-1">
-                    {loan._document_types.split(',').map((type, idx) => (
+                    {loan.document_types.split(',').map((type, idx) => (
                       <span key={idx} className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
                         {type.trim()}
                       </span>
@@ -201,7 +205,7 @@ export default function LoanDetailsTable({ loans, onLoanDeleted }) {
                 )}
                 
                 <div className="mt-2 text-xs text-gray-500">
-                  Last Updated: {loan.updated_at ? formatDate(loan.updated_at) : formatDate(loan.created_at)}
+                  Last Updated: {loan.updated_at ? formatDate(loan.updated_at) : (loan.created_at ? formatDate(loan.created_at) : formatDate(new Date()))}
                   {loan._chunks_processed && ` • ${loan._chunks_processed} sections analyzed`}
                 </div>
               </div>

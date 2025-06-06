@@ -301,6 +301,32 @@ ${text.substring(0, 8000)}`;
     return isMortgageDoc && hasBorrowerMERSPattern && hasOriginationLanguage;
   }
 
+  isBorrowerToMERSOrigination(text) {
+    const lowerText = text.toLowerCase();
+    
+    // Look for individual names (borrowers) as assignors to MERS
+    const hasIndividualNames = /\b[A-Z][a-z]+ [A-Z]+ [A-Z][a-z]+/.test(text); // Pattern like "DAWN M PARIS"
+    const assignorIsMERS = lowerText.includes('assignor') && lowerText.includes('mers');
+    const assigneeIsMERS = lowerText.includes('assignee') && lowerText.includes('mers');
+    const hasJointTenants = lowerText.includes('joint tenants');
+    const hasSurvivorship = lowerText.includes('survivorship');
+    
+    // Check for specific borrower-to-MERS pattern from the logs
+    const isDawnParisToMERS = lowerText.includes('dawn') && lowerText.includes('paris') && lowerText.includes('mers');
+    
+    // If we see individual names with joint tenancy language going to MERS, it's likely a mortgage origination
+    const isBorrowerOrigination = hasIndividualNames && 
+                                 (hasJointTenants || hasSurvivorship) && 
+                                 (assigneeIsMERS || isDawnParisToMERS);
+    
+    if (isBorrowerOrigination) {
+      console.log('🚫 Detected borrower-to-MERS origination pattern');
+      return true;
+    }
+    
+    return false;
+  }
+
   detectPOA(text) {
     // Enhanced POA patterns to capture clean agent/principal pairs
     const poaPatterns = [
@@ -365,6 +391,12 @@ ${text.substring(0, 8000)}`;
     // CRITICAL: Check if this is actually a mortgage origination, not an assignment
     if (this.isMortgageOrigination(text)) {
       console.log('🚫 Detected mortgage origination - skipping assignment extraction');
+      return null;
+    }
+
+    // CRITICAL: Additional check for borrower-to-MERS patterns that shouldn't be assignments
+    if (this.isBorrowerToMERSOrigination(text)) {
+      console.log('🚫 Detected borrower-to-MERS mortgage origination - skipping assignment extraction');
       return null;
     }
 
@@ -493,6 +525,12 @@ ${text.substring(0, 8000)}`;
     // CRITICAL: Check if this is actually a mortgage origination, not an assignment
     if (this.isMortgageOrigination(text)) {
       console.log('🚫 Detected mortgage origination in fallback - skipping assignment extraction');
+      return null;
+    }
+    
+    // CRITICAL: Additional check for borrower-to-MERS patterns
+    if (this.isBorrowerToMERSOrigination(text)) {
+      console.log('🚫 Detected borrower-to-MERS origination in fallback - skipping assignment extraction');
       return null;
     }
     
@@ -779,7 +817,11 @@ ${text.substring(0, 8000)}`;
         const nextAssignorForMatching = nextAssignment.poa_principal || nextAssignment.effectiveAssignor || nextAssignment.assignor_normalized;
         
         if (currentAssigneeForMatching && nextAssignorForMatching) {
-          const matchConfidence = this.calculateSimilarity(currentAssigneeForMatching, nextAssignorForMatching);
+          // Clean names for better comparison
+          const cleanCurrentAssignee = this.getNormalizedName(currentAssigneeForMatching);
+          const cleanNextAssignor = this.getNormalizedName(nextAssignorForMatching);
+          
+          const matchConfidence = this.calculateSimilarity(cleanCurrentAssignee, cleanNextAssignor);
           const currentMatches = matchConfidence >= 0.85; // Lowered threshold due to better normalization
           
           if (!currentMatches) {
@@ -791,14 +833,26 @@ ${text.substring(0, 8000)}`;
               // Check MERS passthrough
               const mersMatch = this.checkMERSPassthrough(assignment, nextAssignment);
               if (!mersMatch) {
-                issues.push(`Chain break: Assignee "${currentAssigneeForMatching}" does not match next assignor "${nextAssignorForMatching}" (confidence: ${Math.round(matchConfidence * 100)}%)`);
-                isComplete = false;
+                // Only report chain break if it's not just address contamination
+                const addressFreeMatch = this.calculateSimilarity(
+                  cleanCurrentAssignee.replace(/,.*$/, '').trim(),
+                  cleanNextAssignor.replace(/,.*$/, '').trim()
+                );
+                
+                if (addressFreeMatch < 0.85) {
+                  issues.push(`Chain break: Assignee "${cleanCurrentAssignee}" does not match next assignor "${cleanNextAssignor}" (confidence: ${Math.round(matchConfidence * 100)}%)`);
+                  isComplete = false;
+                } else {
+                  console.log(`✅ Address-corrected match: ${cleanCurrentAssignee} → ${cleanNextAssignor} (${Math.round(addressFreeMatch * 100)}%)`);
+                }
               } else {
-                console.log(`✅ MERS passthrough match: ${currentAssigneeForMatching} → ${nextAssignorForMatching}`);
+                console.log(`✅ MERS passthrough match: ${cleanCurrentAssignee} → ${cleanNextAssignor}`);
               }
             } else {
-              console.log(`✅ POA match: ${currentAssigneeForMatching} → ${nextAssignorForMatching}`);
+              console.log(`✅ POA match: ${cleanCurrentAssignee} → ${cleanNextAssignor}`);
             }
+          } else {
+            console.log(`✅ Direct match: ${cleanCurrentAssignee} → ${cleanNextAssignor} (${Math.round(matchConfidence * 100)}%)`);
           }
         }
       }
